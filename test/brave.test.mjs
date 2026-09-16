@@ -52,6 +52,19 @@ test("turns the domain filter into search operators and filters the results", as
 	assert.deepEqual(response.results.map(result => result.url), ["https://docs.example.com/a"]);
 });
 
+test("reports domain filter entries that are not valid hostnames", async () => {
+	const fetchImpl = stubFetch(async () => braveResponse(RESULTS));
+	const response = await searchWithBrave("q", {
+		domainFilter: ["docs.example.com", "not a domain", "-"],
+		config: testConfig(),
+		fetchImpl,
+	});
+
+	// A silent drop would tell the model that a filter is active when it is not.
+	assert.deepEqual(response.droppedDomainFilters, ["not a domain", "-"]);
+	assert.equal(new URL(fetchImpl.calls[0].url).searchParams.get("q"), "q site:docs.example.com");
+});
+
 test("maps the recency filter to Brave freshness codes", async () => {
 	const fetchImpl = stubFetch(async () => braveResponse(RESULTS));
 	await searchWithBrave("news", { recencyFilter: "week", config: testConfig(), fetchImpl });
@@ -120,6 +133,15 @@ test("reports other API errors and keeps the key out of the message", async () =
 			return true;
 		},
 	);
+});
+
+test("caps the search response body, like any other body", async () => {
+	// The search answer arrives over the same transport that serves pages, so
+	// an unbounded read here would undo the cap that extract.ts enforces.
+	const huge = "x".repeat(2 * 1024 * 1024 + 1024);
+	const fetchImpl = stubFetch(async () => new Response(huge, { status: 200, headers: { "content-type": "application/json" } }));
+
+	await assert.rejects(searchWithBrave("q", { config: testConfig(), fetchImpl }), /Response too large/);
 });
 
 test("explains how to configure a missing key", async () => {

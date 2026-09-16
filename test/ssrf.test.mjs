@@ -27,6 +27,36 @@ test("blocks non-HTTP protocols", async () => {
 	await assert.rejects(validateRemoteUrl("file:///etc/passwd"), /Only HTTP and HTTPS/);
 });
 
+test("blocks credentials in the URL before they reach a third party", async () => {
+	// The jina engine sends the whole URL to r.jina.ai, so this must fail early.
+	await assert.rejects(
+		validateRemoteUrl("https://user:secret@example.com/page", { lookup: publicLookup }),
+		/Blocked credentials in URL/,
+	);
+	await assert.rejects(
+		validateRemoteUrl("https://user@example.com/page", { lookup: publicLookup }),
+		/Blocked credentials in URL/,
+	);
+});
+
+test("blocks internal name suffixes without waiting for DNS", async () => {
+	// A hostile or split-horizon resolver can answer a public address, so the
+	// name is judged before the resolver is asked.
+	const hostileLookup = async () => { throw new Error("resolver must not be reached"); };
+	const blocked = [
+		"http://printer.local/",
+		"http://build.internal/",
+		"http://nas.home/",
+		"http://router.home.arpa/",
+		"http://db.lan/",
+		"http://metadata/",
+		"http://metadata.google.internal/",
+	];
+	for (const url of blocked) {
+		await assert.rejects(validateRemoteUrl(url, { lookup: hostileLookup }), /Blocked internal hostname/, `${url} must be blocked`);
+	}
+});
+
 test("accepts a public host", async () => {
 	const url = await validateRemoteUrl("https://example.com/page", { lookup: publicLookup });
 	assert.equal(url.hostname, "example.com");

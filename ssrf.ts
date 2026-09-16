@@ -13,6 +13,14 @@ import net from "node:net";
 const DEFAULT_MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+/**
+ * Names that only a local or cloud-internal resolver answers. The address check
+ * below catches most of them, but a split-horizon or hostile resolver can return
+ * a public address for an internal name. This list runs before DNS.
+ */
+const INTERNAL_HOSTNAMES = new Set(["localhost", "metadata", "metadata.google.internal"]);
+const INTERNAL_SUFFIXES = [".localhost", ".local", ".internal", ".home", ".home.arpa", ".lan"];
+
 export type LookupAddress = { address: string; family: number };
 export type Lookup = (hostname: string) => Promise<LookupAddress[]>;
 
@@ -43,10 +51,15 @@ export async function validateRemoteUrl(rawUrl: string | URL, options: GuardOpti
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		throw new Error("Only HTTP and HTTPS URLs can be fetched");
 	}
+	// The Jina engine puts the whole URL in the path of a third-party request,
+	// so credentials in the URL would leave the machine.
+	if (url.username || url.password) {
+		throw new Error("Blocked credentials in URL: strip user:password@ from the address");
+	}
 
 	const hostname = normalizeHostname(url.hostname);
 	if (!hostname) throw new Error("URL must include a hostname");
-	if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+	if (isInternalHostname(hostname)) {
 		throw new Error(`Blocked internal hostname: ${hostname}`);
 	}
 
@@ -105,6 +118,10 @@ export async function fetchRemoteUrl(
 
 function normalizeHostname(hostname: string): string {
 	return hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+}
+
+function isInternalHostname(hostname: string): boolean {
+	return INTERNAL_HOSTNAMES.has(hostname) || INTERNAL_SUFFIXES.some(suffix => hostname.endsWith(suffix));
 }
 
 function domainMatches(hostname: string, entry: string): boolean {

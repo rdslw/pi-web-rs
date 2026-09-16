@@ -44,6 +44,12 @@ export const DEFAULTS = {
 	concurrency: 3,
 	/** User-Agent header for direct HTTP fetches. */
 	userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+	/**
+	 * Append a line to the system prompt that tells the model to treat fetched
+	 * web content as data, not as instructions. Turn it off only when every
+	 * reachable page is trusted.
+	 */
+	untrustedContentPrompt: true,
 
 	search: {
 		/** Results per query. Brave allows 1 to 20. */
@@ -97,6 +103,7 @@ export interface ResolvedConfig {
 	minUsefulChars: number;
 	concurrency: number;
 	userAgent: string;
+	untrustedContentPrompt: boolean;
 	search: {
 		numResults: number;
 		contentCount: number;
@@ -246,6 +253,7 @@ export function loadConfig(): ResolvedConfig {
 		minUsefulChars: asNumber(file.minUsefulChars, DEFAULTS.minUsefulChars, 0, 10_000),
 		concurrency: asNumber(file.concurrency, DEFAULTS.concurrency, 1, 10),
 		userAgent: asString(file.userAgent) ?? DEFAULTS.userAgent,
+		untrustedContentPrompt: asBoolean(file.untrustedContentPrompt, DEFAULTS.untrustedContentPrompt),
 		search: {
 			numResults: asNumber(search.numResults, DEFAULTS.search.numResults, 1, 20),
 			contentCount: asNumber(search.contentCount, DEFAULTS.search.contentCount, 1, 10),
@@ -279,6 +287,7 @@ export function configTemplate(): Record<string, unknown> {
 		minUsefulChars: DEFAULTS.minUsefulChars,
 		concurrency: DEFAULTS.concurrency,
 		userAgent: DEFAULTS.userAgent,
+		untrustedContentPrompt: DEFAULTS.untrustedContentPrompt,
 		search: { ...DEFAULTS.search },
 		pdf: { ...DEFAULTS.pdf },
 		ssrf: { allowRanges: [] },

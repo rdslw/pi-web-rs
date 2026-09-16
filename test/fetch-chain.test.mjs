@@ -128,3 +128,17 @@ test("keeps the text of a page that is only short", async () => {
 	assert.match(result.content, /This domain is for use in documentation examples/,
 		"the extracted text must survive, even though every engine reported a failure");
 });
+
+test("the SSRF guard also covers the URL handed to Jina", async () => {
+	// r.jina.ai receives the target inside its own path, so the guard must run
+	// before the request. The direct engine is covered in extract.test.mjs.
+	const fetchImpl = stubFetch(async () => textResponse(READER_BODY, "text/plain"));
+	const result = await fetchOne("http://169.254.169.254/latest/meta-data/", {
+		engine: "jina",
+		config: testConfig(),
+		fetchImpl,
+	});
+
+	assert.match(result.error ?? "", /Blocked internal address/);
+	assert.equal(fetchImpl.calls.length, 0, "the reader service must never see the URL");
+});

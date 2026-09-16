@@ -37,6 +37,7 @@ const TERMINAL_ERROR_PREFIXES = [
 	"Response too large",
 	"Blocked internal",
 	"Blocked hostname",
+	"Blocked credentials",
 	"Hostname not in domainPolicy",
 	"Only HTTP and HTTPS",
 	"PDF extraction is disabled",
@@ -141,7 +142,8 @@ async function readBufferWithLimit(response: Response, maxBytes: number): Promis
 	return combined.buffer;
 }
 
-async function readTextWithLimit(response: Response, maxBytes: number): Promise<string> {
+/** Decode a response body, and fail instead of buffering more than maxBytes. */
+export async function readTextWithLimit(response: Response, maxBytes: number): Promise<string> {
 	const buffer = await readBufferWithLimit(response, maxBytes);
 	const charset = response.headers.get("content-type")?.match(/charset\s*=\s*["']?([^;"'\s]+)/i)?.[1];
 	try {

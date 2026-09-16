@@ -7,9 +7,13 @@
  */
 
 import { loadConfig, type ResolvedConfig } from "./config.ts";
-import { errorMessage } from "./extract.ts";
+import { errorMessage, readTextWithLimit } from "./extract.ts";
 
 const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
+
+/** A Brave answer is a few hundred kB. The transport is the same one that serves pages, so it gets the same kind of cap. */
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 export interface SearchResult {
 	title: string;
@@ -25,6 +29,8 @@ export interface SearchResponse {
 	results: SearchResult[];
 	/** True when the response carried extra snippets. */
 	hasExtraSnippets: boolean;
+	/** domainFilter entries that are not valid hostnames and were not applied. */
+	droppedDomainFilters: string[];
 }
 
 export interface BraveSearchOptions {
@@ -75,13 +81,21 @@ function normalizeDomain(value: string): string | null {
 interface DomainFilters {
 	allowed: string[];
 	blocked: string[];
+	/** Entries that are not valid hostnames. They reach no operator and no local filter. */
+	dropped: string[];
 }
 
 function normalizeDomainFilters(domainFilter: string[] | undefined): DomainFilters {
-	const filters: DomainFilters = { allowed: [], blocked: [] };
+	const filters: DomainFilters = { allowed: [], blocked: [], dropped: [] };
 	for (const raw of domainFilter ?? []) {
 		const domain = normalizeDomain(raw);
-		if (!domain) continue;
+		// A dropped entry must be reported: a silent drop tells the model that a
+		// filter is active when the results are in fact unfiltered.
+		if (!domain) {
+			const trimmed = raw.trim();
+			if (trimmed && !filters.dropped.includes(trimmed)) filters.dropped.push(trimmed);
+			continue;
+		}
 		const target = raw.trim().startsWith("-") ? filters.blocked : filters.allowed;
 		if (!target.includes(domain)) target.push(domain);
 	}
@@ -115,6 +129,15 @@ function matchesFilters(url: string, filters: DomainFilters): boolean {
 
 function redact(text: string, apiKey: string): string {
 	return apiKey ? text.split(apiKey).join("***") : text;
+}
+
+/** Read an error body under a cap, redacted. An oversized error body is not worth a failure of its own. */
+async function readErrorBody(response: Response, apiKey: string): Promise<string> {
+	try {
+		return redact(await readTextWithLimit(response, MAX_ERROR_BODY_BYTES), apiKey);
+	} catch {
+		return "(error body too large to read)";
+	}
 }
 
 /** A plan that does not include extra_snippets answers 422, or 403 with a plan message. */
@@ -191,7 +214,7 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 		let response = await run(askExtraSnippets);
 
 		if (!response.ok && askExtraSnippets) {
-			const body = redact(await response.text(), apiKey);
+			const body = await readErrorBody(response, apiKey);
 			if (isExtraSnippetRejection(response.status, body)) {
 				if (mode === "on") {
 					throw new Error(
@@ -208,11 +231,11 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 		}
 
 		if (!response.ok) {
-			const body = redact(await response.text(), apiKey);
+			const body = await readErrorBody(response, apiKey);
 			throw new Error(`Brave Search API error ${response.status}: ${body.slice(0, 300)}`);
 		}
 
-		const data = await response.json() as { web?: { results?: BraveWebResult[] } };
+		const data = JSON.parse(await readTextWithLimit(response, MAX_BODY_BYTES)) as { web?: { results?: BraveWebResult[] } };
 		const results: SearchResult[] = [];
 		let hasExtraSnippets = false;
 
@@ -230,7 +253,7 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 			if (results.length >= numResults) break;
 		}
 
-		return { query, results, hasExtraSnippets };
+		return { query, results, hasExtraSnippets, droppedDomainFilters: filters.dropped };
 	} catch (err) {
 		const message = redact(errorMessage(err), apiKey);
 		throw message === errorMessage(err) ? err : new Error(message);
