@@ -26,8 +26,23 @@ test("maps results and reports availability", async () => {
 	const sent = new URL(fetchImpl.calls[0].url);
 	assert.equal(sent.searchParams.get("q"), "pi agent extensions");
 	assert.equal(sent.searchParams.get("count"), "5");
+	assert.equal(sent.searchParams.get("result_filter"), "web", "only web results are parsed, so ask for no other section");
 	assert.equal(sent.searchParams.has("extra_snippets"), false, "extra_snippets costs a Pro plan; ask only when content is wanted");
 	assert.equal(fetchImpl.calls[0].init.headers["X-Subscription-Token"], "test-key");
+});
+
+test("prefers the absolute page_age date over the relative age string", async () => {
+	const fetchImpl = stubFetch(async () => braveResponse([
+		{ title: "Dated", url: "https://example.com/a", description: "", page_age: "2026-03-14T09:00:00Z", age: "3 days ago" },
+		{ title: "Relative only", url: "https://example.com/b", description: "", age: "3 days ago" },
+		{ title: "Unparseable", url: "https://example.com/c", description: "", page_age: "soon" },
+	]));
+	const response = await searchWithBrave("q", { config: testConfig(), fetchImpl });
+
+	assert.equal(response.results[0].published, "2026-03-14");
+	assert.equal(response.results[1].published, undefined, "age stays the fallback when page_age is absent");
+	assert.equal(response.results[1].age, "3 days ago");
+	assert.equal(response.results[2].published, undefined, "an unparseable date is dropped, not passed on");
 });
 
 test("caps the result count at numResults", async () => {

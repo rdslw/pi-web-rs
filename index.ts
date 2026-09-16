@@ -57,7 +57,9 @@ function shorten(value: string, width: number): string {
 
 function renderResultBlock(index: number, result: SearchResult, content?: string): string {
 	const lines = [`${index}. ${result.title}`, `   ${result.url}`];
-	if (result.age) lines.push(`   Age: ${result.age}`);
+	// An absolute date can be compared; "3 days ago" cannot.
+	if (result.published) lines.push(`   Published: ${result.published}`);
+	else if (result.age) lines.push(`   Age: ${result.age}`);
 	if (result.snippet) lines.push(`   ${result.snippet}`);
 	for (const snippet of result.extraSnippets ?? []) lines.push(`   • ${snippet}`);
 	if (content) lines.push("", content.split("\n").map(line => `   ${line}`).join("\n"));
@@ -110,7 +112,8 @@ export default function (pi: ExtensionAPI) {
 				`  Brave API key:   ${maskKey(config.braveApiKey)}`,
 				`  Jina API key:    ${maskKey(config.jinaApiKey)}`,
 				`  Fetch chain:     ${config.fetchChain.join(" → ")}`,
-				`  Timeout:         ${config.timeoutMs} ms`,
+				`  Timeout:         ${config.timeoutMs} ms fetch, ${config.search.timeoutMs} ms search`,
+				`  Jina cache:      ${config.jinaNoCache ? "bypassed (X-No-Cache)" : "used"}`,
 				`  Max response:    ${Math.round(config.maxResponseBytes / 1024 / 1024)} MB`,
 				`  Max inline:      ${config.maxInlineChars} chars`,
 				`  Min useful:      ${config.minUsefulChars} chars`,
@@ -212,6 +215,30 @@ export default function (pi: ExtensionAPI) {
 				}
 			})));
 
+			// Brave extra snippets are already in the response: no extra request.
+			// The targets of every query are collected first, so a URL that two
+			// queries rank is fetched once, and all fetches share one limiter.
+			const targets = new Set<string>();
+			for (const search of searches) {
+				if (!search.response || !includeContent || search.response.hasExtraSnippets) continue;
+				for (const result of search.response.results.slice(0, contentCount)) targets.add(result.url);
+			}
+
+			const contents = new Map<string, string>();
+			if (targets.size > 0) {
+				onUpdate?.({
+					content: [{ type: "text", text: `Fetching ${targets.size} page(s)...` }],
+					details: { phase: "fetch" },
+				});
+				const fetched = await fetchMany([...targets], { ...(signal ? { signal } : {}), config });
+				fetchedPages = fetched.filter(result => !result.error).length;
+				for (const result of fetched) {
+					contents.set(result.url, result.error
+						? `[content unavailable: ${result.error.split("\n")[0]}]`
+						: truncate(result.content, config.search.contentChars).text);
+				}
+			}
+
 			for (const search of searches) {
 				if (search.error || !search.response) {
 					sections.push(`## ${search.query}\n\nError: ${search.error}`);
@@ -221,30 +248,18 @@ export default function (pi: ExtensionAPI) {
 				for (const entry of search.response.droppedDomainFilters) droppedDomainFilters.add(entry);
 				totalResults += results.length;
 
-				// Brave extra snippets are already in the response: no extra request.
-				let contents = new Map<string, string>();
-				if (includeContent && !hasExtraSnippets && results.length > 0) {
-					const targets = results.slice(0, contentCount).map(result => result.url);
-					onUpdate?.({
-						content: [{ type: "text", text: `Fetching ${targets.length} page(s) for "${search.query}"...` }],
-						details: { phase: "fetch" },
-					});
-					const fetched = await fetchMany(targets, { ...(signal ? { signal } : {}), config });
-					fetchedPages += fetched.filter(result => !result.error).length;
-					contents = new Map(fetched.map(result => [
-						result.url,
-						result.error
-							? `[content unavailable: ${result.error.split("\n")[0]}]`
-							: truncate(result.content, config.search.contentChars).text,
-					]));
-				}
 				if (includeContent) {
 					contentSource = hasExtraSnippets ? "extra_snippets" : contents.size > 0 ? "fetch" : contentSource;
 				}
 
+				// The shared map can hold a page that another query ranked higher.
+				// Each query still shows content for its own top contentCount only.
+				const shown = new Set(results.slice(0, contentCount).map(result => result.url));
 				const body = results.length === 0
 					? "No results."
-					: results.map((result, index) => renderResultBlock(index + 1, result, contents.get(result.url))).join("\n\n");
+					: results
+						.map((result, index) => renderResultBlock(index + 1, result, shown.has(result.url) ? contents.get(result.url) : undefined))
+						.join("\n\n");
 				const note = includeContent && hasExtraSnippets ? " (content: Brave extra snippets)" : "";
 				// A dropped filter changes what the results mean, so it goes above them.
 				const warning = search.response.droppedDomainFilters.length > 0

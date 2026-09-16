@@ -99,6 +99,25 @@ test("reports the Jina rate limit with the key hint", async () => {
 	assert.match(result.error ?? "", /jinaApiKey/);
 });
 
+test("asks Jina to drop images, and bypasses its cache only on request", async () => {
+	const fetchImpl = stubFetch(async () => textResponse(READER_BODY, "text/plain"));
+	await fetchOne("https://spa.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl });
+
+	// Image markdown costs tokens and helps no reader.
+	assert.equal(fetchImpl.calls[0].init.headers["X-Retain-Images"], "none");
+	// A new render costs latency and rate limit, so the default uses the cache.
+	assert.equal(fetchImpl.calls[0].init.headers["X-No-Cache"], undefined);
+
+	const noCache = stubFetch(async () => textResponse(READER_BODY, "text/plain"));
+	await fetchOne("https://spa.example.com/", {
+		engine: "jina",
+		config: testConfig({ jinaNoCache: true }),
+		lookup: publicLookup,
+		fetchImpl: noCache,
+	});
+	assert.equal(noCache.calls[0].init.headers["X-No-Cache"], "true");
+});
+
 test("fetches several URLs in one call", async () => {
 	const fetchImpl = stubFetch(async (url) => textResponse(
 		htmlPage(`Page ${url.slice(-1)}`, "Each page returns its own readable article body for the model. "),

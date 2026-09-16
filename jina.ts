@@ -15,8 +15,12 @@ function buildHeaders(config: ResolvedConfig): Record<string, string> {
 	const headers: Record<string, string> = {
 		"Accept": "text/plain",
 		"X-Return-Format": "markdown",
-		"X-No-Cache": "true",
+		// A reader needs no image markdown, and every image line costs tokens.
+		"X-Retain-Images": "none",
 	};
+	// A new render costs latency and rate limit, so the cached page is used
+	// unless the caller asks for a fresh one.
+	if (config.jinaNoCache) headers["X-No-Cache"] = "true";
 	if (config.jinaApiKey) headers.Authorization = `Bearer ${config.jinaApiKey}`;
 	return headers;
 }

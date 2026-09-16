@@ -17,6 +17,8 @@ export function testConfig(overrides = {}) {
 		minUsefulChars: DEFAULTS.minUsefulChars,
 		concurrency: DEFAULTS.concurrency,
 		userAgent: DEFAULTS.userAgent,
+		untrustedContentPrompt: DEFAULTS.untrustedContentPrompt,
+		jinaNoCache: DEFAULTS.jinaNoCache,
 		...overrides,
 		search: { ...DEFAULTS.search, ...(overrides.search ?? {}) },
 		pdf: { ...DEFAULTS.pdf, ...(overrides.pdf ?? {}) },

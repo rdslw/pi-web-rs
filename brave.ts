@@ -21,6 +21,9 @@ export interface SearchResult {
 	snippet: string;
 	/** Brave extra_snippets, present only on plans that support them. */
 	extraSnippets?: string[];
+	/** Publication date as YYYY-MM-DD, from Brave page_age. */
+	published?: string;
+	/** Brave age, a relative string such as "3 days ago". Fallback for published. */
 	age?: string;
 }
 
@@ -153,7 +156,19 @@ interface BraveWebResult {
 	url?: string;
 	description?: string;
 	extra_snippets?: unknown;
+	page_age?: string;
 	age?: string;
+}
+
+/**
+ * Brave age is relative to the time of the search ("3 days ago"), so it cannot
+ * be compared against another result or against a date in the conversation.
+ * page_age is ISO 8601 and is preferred when it is present.
+ */
+function toPublishedDate(pageAge: string | undefined): string | undefined {
+	if (!pageAge) return undefined;
+	const parsed = new Date(pageAge);
+	return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().slice(0, 10);
 }
 
 function toStringArray(value: unknown): string[] | undefined {
@@ -189,6 +204,9 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 			q: searchQuery,
 			// Domain operators cost results, so over-fetch and filter locally.
 			count: String(filters.allowed.length || filters.blocked.length ? 20 : numResults),
+			// Only web results are parsed. Without this Brave builds and sends
+			// news, video, and discussion blocks that are thrown away.
+			result_filter: "web",
 			text_decorations: "0",
 			safesearch: config.search.safesearch,
 		});
@@ -205,8 +223,8 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 				"Accept-Encoding": "gzip",
 			},
 			signal: options.signal
-				? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), options.signal])
-				: AbortSignal.timeout(config.timeoutMs),
+				? AbortSignal.any([AbortSignal.timeout(config.search.timeoutMs), options.signal])
+				: AbortSignal.timeout(config.search.timeoutMs),
 		});
 	};
 
@@ -243,11 +261,13 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 			if (!item.url || !matchesFilters(item.url, filters)) continue;
 			const extraSnippets = toStringArray(item.extra_snippets);
 			if (extraSnippets) hasExtraSnippets = true;
+			const published = toPublishedDate(item.page_age);
 			results.push({
 				title: item.title || item.url,
 				url: item.url,
 				snippet: item.description || "",
 				...(extraSnippets ? { extraSnippets } : {}),
+				...(published ? { published } : {}),
 				...(item.age ? { age: item.age } : {}),
 			});
 			if (results.length >= numResults) break;

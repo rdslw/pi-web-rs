@@ -37,7 +37,7 @@ For manual install methods (such as `npm pack` or `git archive`), offline setup,
 
 ## Tool: `web_search`
 
-Brave Search API. Each query returns its own ranked result list.
+Brave Search API. Each query returns its own ranked result list. A result carries `Published: YYYY-MM-DD` when Brave reports a page date, and the relative `Age:` string otherwise.
 
 | Param | Type | Description |
 |-------|------|-------------|
@@ -56,7 +56,7 @@ Brave has no domain parameter, so `domainFilter` becomes `site:` and `NOT site:`
 `includeContent` prefers content that Brave itself returns:
 
 1. The request asks for `extra_snippets` — up to five excerpts per result, no second request, no extra latency. This parameter needs a Brave Pro plan.
-2. If the plan rejects it (HTTP 422), the extension retries once without the parameter, remembers the plan limit for the session, and fetches the top `contentCount` pages through the fetch chain instead.
+2. If the plan rejects it (HTTP 422), the extension retries once without the parameter, remembers the plan limit for the session, and fetches the top `contentCount` pages through the fetch chain instead. With several queries the page list is deduplicated first, so a URL that two queries rank is fetched once.
 
 `search.extraSnippets` in the config controls this: `auto` (the behaviour above), `on` (report the rejection as an error), `off` (never ask; always fetch the pages).
 
@@ -126,7 +126,9 @@ Written with defaults by `/webrs init`:
   "concurrency": 3,
   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
   "untrustedContentPrompt": true,
+  "jinaNoCache": false,
   "search": {
+    "timeoutMs": 10000,
     "numResults": 5,
     "contentCount": 3,
     "contentChars": 4000,
@@ -157,12 +159,14 @@ Written with defaults by `/webrs init`:
 | `jinaApiKey` | string | `""` | Optional Jina Reader API key for higher rate limits |
 | `fetchChain` | string[] | `["http", "jina"]` | Extraction order: `"http"`, `"jina"`, or fallback order |
 | `timeoutMs` | integer | `30000` | Fetch budget per attempt in ms (1 000–300 000) |
+| `jinaNoCache` | boolean | `false` | Send `X-No-Cache` to force a new Jina render (slower, costs rate limit) |
 | `maxResponseBytes` | integer | `5242880` | Downloaded body cap in bytes, 5 MiB (64 KiB–100 MiB) |
 | `maxInlineChars` | integer | `30000` | Max characters returned per fetch (1 000–500 000) |
 | `minUsefulChars` | integer | `200` | Below this extraction length, try next engine (0–10 000) |
 | `concurrency` | integer | `3` | Parallel fetches inside one tool call (1–10) |
 | `userAgent` | string | Chrome UA | User-Agent header for direct HTTP fetches |
 | `untrustedContentPrompt` | boolean | `true` | Append the untrusted-content note to the system prompt |
+| `search.timeoutMs` | integer | `10000` | Brave request budget in ms (1 000–300 000) |
 | `search.numResults` | integer | `5` | Results per query (1–20) |
 | `search.contentCount` | integer | `3` | Result pages fetched when `includeContent` is on (1–10) |
 | `search.contentChars` | integer | `4000` | Characters of page content kept per result (200–50 000) |
@@ -190,7 +194,7 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 63 tests, no network access
+npm test         # 65 tests, no network access
 npm run typecheck
 ```
 

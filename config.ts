@@ -51,7 +51,18 @@ export const DEFAULTS = {
 	 */
 	untrustedContentPrompt: true,
 
+	/**
+	 * Send X-No-Cache to Jina Reader, which orders a new render instead of the
+	 * cached one. It costs latency and rate limit, so it is off by default.
+	 */
+	jinaNoCache: false,
+
 	search: {
+		/**
+		 * Budget for one Brave request. Shorter than timeoutMs on purpose: a
+		 * search is one small JSON call, and the agent waits with nothing to show.
+		 */
+		timeoutMs: 10_000,
 		/** Results per query. Brave allows 1 to 20. */
 		numResults: 5,
 		/** Result pages fetched when includeContent is on and Brave gives no extra snippets. */
@@ -104,7 +115,9 @@ export interface ResolvedConfig {
 	concurrency: number;
 	userAgent: string;
 	untrustedContentPrompt: boolean;
+	jinaNoCache: boolean;
 	search: {
+		timeoutMs: number;
 		numResults: number;
 		contentCount: number;
 		contentChars: number;
@@ -254,7 +267,9 @@ export function loadConfig(): ResolvedConfig {
 		concurrency: asNumber(file.concurrency, DEFAULTS.concurrency, 1, 10),
 		userAgent: asString(file.userAgent) ?? DEFAULTS.userAgent,
 		untrustedContentPrompt: asBoolean(file.untrustedContentPrompt, DEFAULTS.untrustedContentPrompt),
+		jinaNoCache: asBoolean(file.jinaNoCache, DEFAULTS.jinaNoCache),
 		search: {
+			timeoutMs: asNumber(search.timeoutMs, DEFAULTS.search.timeoutMs, 1_000, 300_000),
 			numResults: asNumber(search.numResults, DEFAULTS.search.numResults, 1, 20),
 			contentCount: asNumber(search.contentCount, DEFAULTS.search.contentCount, 1, 10),
 			contentChars: asNumber(search.contentChars, DEFAULTS.search.contentChars, 200, 50_000),
@@ -288,6 +303,7 @@ export function configTemplate(): Record<string, unknown> {
 		concurrency: DEFAULTS.concurrency,
 		userAgent: DEFAULTS.userAgent,
 		untrustedContentPrompt: DEFAULTS.untrustedContentPrompt,
+		jinaNoCache: DEFAULTS.jinaNoCache,
 		search: { ...DEFAULTS.search },
 		pdf: { ...DEFAULTS.pdf },
 		ssrf: { allowRanges: [] },
