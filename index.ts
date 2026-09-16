@@ -18,6 +18,7 @@ import {
 	loadConfig,
 	maskKey,
 } from "./config.ts";
+import { pageCacheSize } from "./cache.ts";
 import { extraSnippetsDisabled, isBraveAvailable, searchWithBrave, type SearchResult } from "./brave.ts";
 import { fetchMany, fetchOne, type EngineChoice } from "./fetch.ts";
 import { findContent, type FindMode } from "./find.ts";
@@ -49,6 +50,42 @@ const UNTRUSTED_CONTENT_PROMPT =
 function truncate(text: string, maxChars: number): { text: string; truncated: boolean } {
 	if (text.length <= maxChars) return { text, truncated: false };
 	return { text: `${text.slice(0, maxChars)}\n\n[Truncated: ${text.length} chars total]`, truncated: true };
+}
+
+interface Page {
+	text: string;
+	offset: number;
+	returnedChars: number;
+	totalChars: number;
+	nextOffset?: number;
+	hasMore: boolean;
+}
+
+/** Prefer a paragraph or line break near the end of the window over a cut inside a word. */
+function sliceBoundary(text: string, start: number, end: number): number {
+	if (end >= text.length) return end;
+	const minimum = start + Math.floor((end - start) * 0.75);
+	const paragraph = text.lastIndexOf("\n\n", end);
+	if (paragraph >= minimum) return paragraph;
+	const line = text.lastIndexOf("\n", end);
+	return line >= minimum ? line : end;
+}
+
+/** One window of a long page. The caller reads on with the reported nextOffset. */
+export function paginate(text: string, offset: number, maxChars: number): Page {
+	const totalChars = text.length;
+	if (offset >= totalChars) return { text: "", offset, returnedChars: 0, totalChars, hasMore: false };
+
+	const end = sliceBoundary(text, offset, Math.min(offset + maxChars, totalChars));
+	const body = text.slice(offset, end);
+	return {
+		text: body,
+		offset,
+		returnedChars: body.length,
+		totalChars,
+		...(end < totalChars ? { nextOffset: end } : {}),
+		hasMore: end < totalChars,
+	};
 }
 
 function shorten(value: string, width: number): string {
@@ -126,6 +163,7 @@ export default function (pi: ExtensionAPI) {
 				...(config.search.country ? [`  Country:         ${config.search.country}`] : []),
 				...(config.search.searchLang ? [`  Language:        ${config.search.searchLang}`] : []),
 				`  PDF:             ${config.pdf.enabled ? `enabled, max ${config.pdf.maxPages} pages` : "disabled"}`,
+				`  Page cache:      ${config.cache.enabled ? `${pageCacheSize()}/${config.cache.capacity} entries, ${Math.round(config.cache.ttlMs / 1000)} s TTL` : "disabled"}`,
 				"",
 				`  Untrusted note:  ${config.untrustedContentPrompt ? "appended to the system prompt" : "off"}`,
 				`  SSRF allow:      ${config.ssrf.allowRanges.join(", ") || "(none)"}`,
@@ -327,12 +365,14 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Fetch URL(s) and extract readable content as markdown. Handles HTML (Readability), PDF (unpdf), plain text, JSON, and XML. " +
 			"The extraction chain is configured in web-rs.json; by default a direct HTTP fetch runs first and Jina Reader retries pages " +
-			"that are blocked or JavaScript-rendered. Pass 'find' to return only the matching passages of a long page instead of the whole text.",
-		promptSnippet: "Use to read URL(s) as markdown. Pass find:[...] to return only matching passages of a long page.",
+			"that are blocked or JavaScript-rendered. Pass 'find' to return only the matching passages of a long page instead of the whole text, " +
+			"or 'offset' to read the next window of a page that did not fit in one call.",
+		promptSnippet: "Use to read URL(s) as markdown. Pass find:[...] for matching passages only, or offset to continue a long page.",
 		parameters: Type.Object({
 			url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
 			urls: Type.Optional(Type.Array(Type.String(), { description: "Several URLs, fetched in parallel" })),
 			maxChars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 500000, description: "Max characters returned inline (default 30000)" })),
+			offset: Type.Optional(Type.Integer({ minimum: 0, description: "Start of the window into the page text, in characters (default 0). Pass the offset that the previous call reported to read the next part. Single url only; the page is cached, so reading on costs no new request" })),
 			engine: Type.Optional(StringEnum(["auto", "http", "jina"], { description: "Override the configured chain: auto uses fetchChain, http is the direct fetch, jina is the Jina Reader" })),
 			find: Type.Optional(Type.Array(Type.String(), { description: "Return only passages that match these strings, with surrounding context" })),
 			findMode: Type.Optional(StringEnum(["exact", "case-insensitive", "fuzzy"], { description: "Match mode for find (default case-insensitive)" })),
@@ -349,6 +389,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const maxChars = params.maxChars ?? config.maxInlineChars;
+			// A window into one page only. With several URLs each block is its own
+			// document, so a single offset would mean nothing.
+			const offset = urls.length === 1 ? params.offset ?? 0 : 0;
 			const findQueries = (params.find ?? []).filter(query => query.trim().length > 0);
 			const findMode = (params.findMode ?? "case-insensitive") as FindMode;
 
@@ -385,11 +428,27 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 				const { body, matchCount } = present(result);
-				const output = truncate(body, maxChars);
+				const page = paginate(body, offset, maxChars);
+
+				if (page.returnedChars === 0 && page.totalChars > 0) {
+					return {
+						content: [{ type: "text", text: `Offset ${offset} is past the end of the text. Total length: ${page.totalChars} chars.` }],
+						details: { urls, urlCount: 1, successful: 1, title: result.title, engine: result.engine, totalChars: page.totalChars, offset, hasMore: false },
+					};
+				}
+
 				const header = result.pages ? `PDF: ${result.pages.read} of ${result.pages.total} pages\n\n` : "";
+				// Name the window only when the text does not fit in one, so a
+				// short page keeps a clean output.
+				const window = page.offset > 0 || page.hasMore
+					? `[Chars ${page.offset}-${page.offset + page.returnedChars - 1} of ${page.totalChars}]\n\n`
+					: "";
+				const more = page.hasMore
+					? `\n\n[More text: web_fetch(url="${result.url}", offset=${page.nextOffset})]`
+					: "";
 				const note = result.error ? `\n\n---\n${partialNote(result)}` : "";
 				return {
-					content: [{ type: "text", text: header + output.text + note }],
+					content: [{ type: "text", text: header + window + page.text + more + note }],
 					details: {
 						urls,
 						urlCount: 1,
@@ -397,8 +456,12 @@ export default function (pi: ExtensionAPI) {
 						partial: Boolean(result.error),
 						title: result.title,
 						engine: result.engine,
-						totalChars: result.content.length,
-						truncated: output.truncated,
+						totalChars: page.totalChars,
+						offset: page.offset,
+						returnedChars: page.returnedChars,
+						...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }),
+						hasMore: page.hasMore,
+						fromCache: Boolean(result.fromCache),
 						...(matchCount === undefined ? {} : { matchCount }),
 					},
 				};
@@ -426,12 +489,13 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme) {
-			const { url, urls, find, engine } = args as { url?: string; urls?: string[]; find?: string[]; engine?: string };
+			const { url, urls, find, engine, offset } = args as { url?: string; urls?: string[]; find?: string[]; engine?: string; offset?: number };
 			const list = urls ?? (url ? [url] : []);
 			const title = theme.fg("toolTitle", theme.bold("web_fetch "));
 			if (list.length === 0) return new Text(title + theme.fg("error", "(no URL)"), 0, 0);
 
 			const suffix = (engine && engine !== "auto" ? theme.fg("muted", ` via ${engine}`) : "") +
+				(offset ? theme.fg("muted", ` from ${offset}`) : "") +
 				(find?.length ? theme.fg("muted", ` find: ${find.join(", ")}`) : "");
 			if (list.length === 1) return new Text(title + theme.fg("accent", shorten(list[0], 60)) + suffix, 0, 0);
 
@@ -449,9 +513,10 @@ export default function (pi: ExtensionAPI) {
 				title?: string;
 				engine?: string;
 				engines?: string[];
-				truncated?: boolean;
 				partial?: boolean | number;
 				matchCount?: number;
+				nextOffset?: number;
+				fromCache?: boolean;
 				error?: string;
 				phase?: string;
 			};
@@ -462,9 +527,10 @@ export default function (pi: ExtensionAPI) {
 			const summary = details?.urlCount === 1
 				? theme.fg("success", details?.title || "Untitled") +
 					theme.fg("muted", ` (${details?.totalChars ?? 0} chars${engineLabel ? `, ${engineLabel}` : ""})`) +
+					(details?.fromCache ? theme.fg("muted", " · cached") : "") +
 					(details?.matchCount === undefined ? "" : theme.fg("muted", ` · ${details.matchCount} matches`)) +
 					(details?.partial ? theme.fg("warning", " [partial]") : "") +
-					(details?.truncated ? theme.fg("warning", " [truncated]") : "")
+					(details?.nextOffset === undefined ? "" : theme.fg("warning", ` [more at ${details.nextOffset}]`))
 				: theme.fg("success", `${details?.successful ?? 0}/${details?.urlCount ?? 0} URLs fetched`) +
 					theme.fg("muted", ` (${details?.totalChars ?? 0} chars${engineLabel ? `, ${engineLabel}` : ""})`);
 			if (!expanded) return new Text(summary, 0, 0);

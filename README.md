@@ -1,6 +1,6 @@
 # pi-web-rs
 
-Web search and web fetch for the [Pi coding agent](https://github.com/earendil-works/pi). Two tools, one command, five source files. It is a deliberate subset of [pi-web-access](https://github.com/nicobailon/pi-web-access): Brave for search, HTTP or Jina for fetch, unpdf for PDF.
+Web search and web fetch for the [Pi coding agent](https://github.com/earendil-works/pi). Two tools, one command, nine source files. It is a deliberate subset of [pi-web-access](https://github.com/nicobailon/pi-web-access): Brave for search, HTTP or Jina for fetch, unpdf for PDF.
 
 ## Origin
 
@@ -67,11 +67,25 @@ Brave has no domain parameter, so `domainFilter` becomes `site:` and `NOT site:`
 | `url` | string | Single URL |
 | `urls` | string[] | Several URLs, fetched in parallel |
 | `maxChars` | integer | Characters returned inline, 1000–500000 (default 30000) |
+| `offset` | integer | Start of the window into the page text (default 0); single `url` only |
 | `engine` | enum | `auto` (use the chain), `http`, `jina` |
 | `find` | string[] | Return only matching passages, with context |
 | `findMode` | enum | `exact`, `case-insensitive` (default), `fuzzy` |
 
 `find` turns a 50 000 character page into a few hundred characters of matched passages. `fuzzy` tolerates misspellings and word order, so `find: ["rate limt"]` still matches "rate limit".
+
+### Reading a long page
+
+A page that does not fit in `maxChars` ends with the call that returns the next window:
+
+```
+[Chars 0-29999 of 84210]
+...text...
+
+[More text: web_fetch(url="https://example.com/spec", offset=29984)]
+```
+
+The window is cut at a paragraph or line break, not inside a word. The page stays in the [page cache](#page-cache), so reading on costs no new request.
 
 ## Extraction chain
 
@@ -80,6 +94,12 @@ The order lives in `fetchChain`. It is an editable constant in `config.ts`, over
 Default `["http", "jina"]`: the direct fetch runs first, and Jina retries only after a recoverable failure (HTTP error, bot block, JavaScript-rendered page, extraction below `minUsefulChars`).
 
 Terminal failures — unsupported content type, oversized body, blocked address, disabled PDF — stop the chain at once, because no other engine repairs them.
+
+## Page cache
+
+An extracted page is held in memory for `cache.ttlMs`, keyed by URL and by the `engine` parameter. It removes the second request in the two common repeats: `web_search` with `includeContent` extracts a page that the model then reads with `web_fetch`, and `offset` pages through a long document.
+
+Only a complete extraction is stored. A failure is never cached, because a block or a rate limit is usually temporary. A page longer than `cache.maxChars` is returned but not stored. `/webrs show` reports how many entries are held.
 
 ## Supported content
 
@@ -92,7 +112,7 @@ Terminal failures — unsupported content type, oversized body, blocked address,
 
 ## Command: `/webrs [show|init]`
 
-- `/webrs` or `/webrs show` — keys masked, active chain, limits, and whether the Brave plan rejected extra snippets this session
+- `/webrs` or `/webrs show` — keys masked, active chain, limits, page cache use, and whether the Brave plan rejected extra snippets this session
 - `/webrs init` — write `~/.pi/agent/web-rs.json` with the defaults, mode 0600
 
 ## Configuration
@@ -141,6 +161,12 @@ Written with defaults by `/webrs init`:
     "enabled": true,
     "maxPages": 50
   },
+  "cache": {
+    "enabled": true,
+    "ttlMs": 300000,
+    "capacity": 20,
+    "maxChars": 250000
+  },
   "ssrf": {
     "allowRanges": []
   },
@@ -176,6 +202,10 @@ Written with defaults by `/webrs init`:
 | `search.safesearch` | enum | `"moderate"` | `"off"`, `"moderate"`, or `"strict"` |
 | `pdf.enabled` | boolean | `true` | Enable PDF text extraction via unpdf |
 | `pdf.maxPages` | integer | `50` | Maximum pages read from one PDF (1–1 000) |
+| `cache.enabled` | boolean | `true` | Hold extracted pages in memory for reuse |
+| `cache.ttlMs` | integer | `300000` | Age at which an entry is discarded, in ms (0–3 600 000) |
+| `cache.capacity` | integer | `20` | Entries held; least recently used is evicted first (1–200) |
+| `cache.maxChars` | integer | `250000` | Pages longer than this are served but not stored (1 000–2 000 000) |
 | `ssrf.allowRanges` | string[] | `[]` | CIDR ranges exempt from SSRF guard (e.g. proxy ranges) |
 | `domainPolicy.allow` | string[] | `[]` | Allowed hostnames (empty allows any public host) |
 | `domainPolicy.deny` | string[] | `[]` | Denied hostnames (subdomains match; wins over allow) |
@@ -194,7 +224,7 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 65 tests, no network access
+npm test         # 74 tests, no network access
 npm run typecheck
 ```
 

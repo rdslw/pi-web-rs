@@ -5,6 +5,7 @@
  */
 
 import pLimit from "p-limit";
+import { cacheKey, getCached, setCached } from "./cache.ts";
 import { loadConfig, type FetchEngine, type ResolvedConfig } from "./config.ts";
 import { abortedResult, isTerminalError, type ExtractedContent } from "./extract.ts";
 import { extractViaHttp } from "./extract.ts";
@@ -41,6 +42,12 @@ export async function fetchOne(url: string, options: FetchChainOptions = {}): Pr
 	const config = options.config ?? loadConfig();
 	if (options.signal?.aborted) return abortedResult(url);
 
+	// Only a complete extraction is cached. A failure must be retried, because
+	// a block or a rate limit is usually temporary.
+	const key = cacheKey(url, options.engine);
+	const cached = getCached(key, config.cache);
+	if (cached) return cached;
+
 	const chain = resolveChain(config, options.engine);
 	const attempts: string[] = [];
 	let firstResult: ExtractedContent | null = null;
@@ -54,7 +61,10 @@ export async function fetchOne(url: string, options: FetchChainOptions = {}): Pr
 			...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
 		});
 		firstResult ??= result;
-		if (!result.error) return result;
+		if (!result.error) {
+			setCached(key, result, config.cache);
+			return result;
+		}
 		if (options.signal?.aborted) return abortedResult(url);
 
 		// A short page is reported as incomplete, but the text is still the page.

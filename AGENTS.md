@@ -10,7 +10,8 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 |------|----------------|
 | `index.ts` | Registers `web_search`, `web_fetch`, `/webrs`, and the untrusted-content system prompt; formats the tool output and the transcript rendering |
 | `config.ts` | `DEFAULTS` block, `web-rs.json` loader, environment overrides, resolved config shape |
-| `fetch.ts` | Engine chain: order, fallback, terminal-error stop, parallel fetches |
+| `fetch.ts` | Engine chain: order, fallback, terminal-error stop, parallel fetches, cache lookup |
+| `cache.ts` | Page cache: LRU with TTL, keyed by URL and engine choice |
 | `extract.ts` | HTTP engine: Readability + Turndown, unpdf, text passthrough, size limits |
 | `jina.ts` | Jina Reader engine |
 | `brave.ts` | Brave Search API, domain operators, extra_snippets plan detection |
@@ -26,8 +27,12 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 - Every response body is read under a byte cap, search answers included
 - `extra_snippets` is requested only when the caller wants content, and no more after the plan rejects it
 - A domainFilter entry that cannot be applied is reported, never dropped in silence
+- Only a complete extraction is cached; a failure is always retried
+- Offset windows cover the text once: no gap, no overlap, and the offset always advances
 - Config precedence is environment > file > `DEFAULTS`
 
 ## Testing
 
-`npm test` runs 65 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
+`npm test` runs 74 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
+
+`testConfig()` disables the page cache, because the cache lives for the life of the process and would carry a page from one test into the next. A test that needs the cache asks for it with `testConfig({ cache: { enabled: true } })` and calls `clearPageCache()` at both ends.

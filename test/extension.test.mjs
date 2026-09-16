@@ -8,7 +8,7 @@ import { join } from "node:path";
 // web-rs.json cannot change the expected output.
 process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-web-rs-ext-"));
 
-import createExtension from "../index.ts";
+import createExtension, { paginate } from "../index.ts";
 
 function stubPi() {
 	const tools = new Map();
@@ -58,7 +58,7 @@ test("the tool schemas expose the documented parameters", () => {
 	assert.deepEqual(Object.keys(search).sort(), ["contentCount", "domainFilter", "includeContent", "numResults", "queries", "query", "recencyFilter"].sort());
 
 	const fetchTool = pi.tools.get("web_fetch").parameters.properties;
-	assert.deepEqual(Object.keys(fetchTool).sort(), ["engine", "find", "findMode", "maxChars", "url", "urls"].sort());
+	assert.deepEqual(Object.keys(fetchTool).sort(), ["engine", "find", "findMode", "maxChars", "offset", "url", "urls"].sort());
 	assert.deepEqual(fetchTool.engine.anyOf?.[0]?.enum ?? fetchTool.engine.enum, ["auto", "http", "jina"]);
 });
 
@@ -77,6 +77,32 @@ test("a search with no query reports the error instead of calling Brave", async 
 
 	const result = await pi.tools.get("web_search").execute("id", {}, undefined, undefined, {});
 	assert.match(result.content[0].text, /No query provided/);
+});
+
+test("the offset windows cover the whole text with no gap and no overlap", () => {
+	const text = Array.from({ length: 40 }, (_, index) => `Paragraph ${index} of the document.`).join("\n\n");
+
+	let offset = 0;
+	let rebuilt = "";
+	let windows = 0;
+	for (;;) {
+		const page = paginate(text, offset, 200);
+		rebuilt += page.text;
+		windows += 1;
+		if (!page.hasMore) break;
+		offset = page.nextOffset;
+		assert.ok(windows < 50, "the offset must advance, never loop");
+	}
+
+	assert.ok(windows > 1, "the sample must need more than one window");
+	assert.equal(rebuilt, text, "every character is returned exactly once");
+});
+
+test("an offset past the end reports the length instead of empty text", () => {
+	const page = paginate("short body", 500, 1000);
+	assert.equal(page.returnedChars, 0);
+	assert.equal(page.totalChars, 10);
+	assert.equal(page.hasMore, false);
 });
 
 test("renderCall summarizes the call for the transcript", () => {

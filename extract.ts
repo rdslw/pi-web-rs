@@ -17,6 +17,8 @@ export interface ExtractedContent {
 	status?: number;
 	/** Pages read from a PDF, and the page count of the document. */
 	pages?: { read: number; total: number };
+	/** True when the content came from the page cache, not from the network. */
+	fromCache?: boolean;
 }
 
 export interface ExtractOptions {

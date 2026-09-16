@@ -90,6 +90,21 @@ export const DEFAULTS = {
 	},
 
 	/**
+	 * Short-lived memory of extracted pages. It pays for itself when web_search
+	 * fetches a page that web_fetch then reads, and when the model pages through
+	 * a long document with the offset parameter.
+	 */
+	cache: {
+		enabled: true,
+		/** Age at which an entry is discarded. 0 disables reuse. */
+		ttlMs: 300_000,
+		/** Entries held. The least recently used entry is evicted first. */
+		capacity: 20,
+		/** Pages longer than this are served but not stored. */
+		maxChars: 250_000,
+	},
+
+	/**
 	 * CIDR ranges exempt from the SSRF guard. Needed only for a TUN or fake-IP
 	 * proxy that maps public names into a reserved range, e.g. ["198.18.0.0/15"].
 	 */
@@ -127,6 +142,7 @@ export interface ResolvedConfig {
 		safesearch: SafeSearch;
 	};
 	pdf: { enabled: boolean; maxPages: number };
+	cache: { enabled: boolean; ttlMs: number; capacity: number; maxChars: number };
 	ssrf: { allowRanges: string[] };
 	domainPolicy: { allow: string[]; deny: string[] };
 }
@@ -250,6 +266,7 @@ export function loadConfig(): ResolvedConfig {
 	const file = loadConfigFile();
 	const search = section(file, "search");
 	const pdf = section(file, "pdf");
+	const cache = section(file, "cache");
 	const ssrf = section(file, "ssrf");
 	const domainPolicy = section(file, "domainPolicy");
 
@@ -282,6 +299,12 @@ export function loadConfig(): ResolvedConfig {
 			enabled: asBoolean(pdf.enabled, DEFAULTS.pdf.enabled),
 			maxPages: asNumber(pdf.maxPages, DEFAULTS.pdf.maxPages, 1, 1_000),
 		},
+		cache: {
+			enabled: asBoolean(cache.enabled, DEFAULTS.cache.enabled),
+			ttlMs: asNumber(cache.ttlMs, DEFAULTS.cache.ttlMs, 0, 3_600_000),
+			capacity: asNumber(cache.capacity, DEFAULTS.cache.capacity, 1, 200),
+			maxChars: asNumber(cache.maxChars, DEFAULTS.cache.maxChars, 1_000, 2_000_000),
+		},
 		ssrf: { allowRanges: asStringArray(ssrf.allowRanges, DEFAULTS.ssrf.allowRanges) },
 		domainPolicy: {
 			allow: asStringArray(domainPolicy.allow, DEFAULTS.domainPolicy.allow),
@@ -306,6 +329,7 @@ export function configTemplate(): Record<string, unknown> {
 		jinaNoCache: DEFAULTS.jinaNoCache,
 		search: { ...DEFAULTS.search },
 		pdf: { ...DEFAULTS.pdf },
+		cache: { ...DEFAULTS.cache },
 		ssrf: { allowRanges: [] },
 		domainPolicy: { allow: [], deny: [] },
 	};

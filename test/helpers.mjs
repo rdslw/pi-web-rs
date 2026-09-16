@@ -22,6 +22,9 @@ export function testConfig(overrides = {}) {
 		...overrides,
 		search: { ...DEFAULTS.search, ...(overrides.search ?? {}) },
 		pdf: { ...DEFAULTS.pdf, ...(overrides.pdf ?? {}) },
+		// The page cache lives for the life of the process, so one test would
+		// serve its pages to the next. Tests that want it opt in.
+		cache: { ...DEFAULTS.cache, enabled: false, ...(overrides.cache ?? {}) },
 		ssrf: { allowRanges: [], ...(overrides.ssrf ?? {}) },
 		domainPolicy: { allow: [], deny: [], ...(overrides.domainPolicy ?? {}) },
 	};
