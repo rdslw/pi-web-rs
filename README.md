@@ -60,6 +60,28 @@ Brave has no domain parameter, so `domainFilter` becomes `site:` and `NOT site:`
 
 `search.extraSnippets` in the config controls this: `auto` (the behaviour above), `on` (report the rejection as an error), `off` (never ask; always fetch the pages).
 
+### What the output states
+
+Each query section names the filters that were applied and the method that applied them, because Brave has no domain parameter and a `site:` operator is not the same thing:
+
+```
+## rust async runtime
+
+Freshness: week (Brave native)
+Domains: docs.rs (site: operator, then filtered locally)
+Ignored, not valid hostnames: not a domain
+Content: fetched pages
+
+1. Title
+   https://docs.rs/...
+```
+
+### Output budget
+
+`search.maxOutputChars` (12 000 by default) bounds the whole answer, separate from `maxInlineChars`. A result list is a menu to choose from, not a document.
+
+When the answer is too long, page content is dropped first and the titles and URLs are kept, because `web_fetch` reads any entry in full afterwards. The output states that this happened. Only if the list alone still exceeds the budget is the text cut.
+
 ### Transient failures
 
 A Brave answer of 408, 429, or 5xx, and a network error, are treated as temporary: the request runs again, up to `search.maxRetries` times. The wait comes from the `Retry-After` header when Brave sends one, and from a 500 ms, 1 000 ms backoff when it does not.
@@ -161,6 +183,7 @@ Written with defaults by `/webrs init`:
     "numResults": 5,
     "contentCount": 3,
     "contentChars": 4000,
+    "maxOutputChars": 12000,
     "extraSnippets": "auto",
     "country": "",
     "searchLang": "",
@@ -206,6 +229,7 @@ Written with defaults by `/webrs init`:
 | `search.numResults` | integer | `5` | Results per query (1–20) |
 | `search.contentCount` | integer | `3` | Result pages fetched when `includeContent` is on (1–10) |
 | `search.contentChars` | integer | `4000` | Characters of page content kept per result (200–50 000) |
+| `search.maxOutputChars` | integer | `12000` | Budget for the whole `web_search` answer (1 000–200 000) |
 | `search.extraSnippets` | enum | `"auto"` | `"auto"` (try and fallback), `"on"`, or `"off"` |
 | `search.country` | string | `""` | Two-letter country code, e.g. `"pl"`, `"us"` |
 | `search.searchLang` | string | `""` | ISO 639-1 language code, e.g. `"en"` |
@@ -234,7 +258,7 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 82 tests, no network access
+npm test         # 84 tests, no network access
 npm run typecheck
 ```
 

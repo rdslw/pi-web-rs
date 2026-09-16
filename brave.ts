@@ -34,6 +34,10 @@ export interface SearchResponse {
 	hasExtraSnippets: boolean;
 	/** domainFilter entries that are not valid hostnames and were not applied. */
 	droppedDomainFilters: string[];
+	/** The filters that did reach the query, so the output can name them. */
+	appliedDomainFilters: { allowed: string[]; blocked: string[] };
+	/** The recency filter that Brave accepted, if any. */
+	recencyFilter?: string;
 }
 
 export interface BraveSearchOptions {
@@ -344,7 +348,14 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 			if (results.length >= numResults) break;
 		}
 
-		return { query, results, hasExtraSnippets, droppedDomainFilters: filters.dropped };
+		return {
+			query,
+			results,
+			hasExtraSnippets,
+			droppedDomainFilters: filters.dropped,
+			appliedDomainFilters: { allowed: filters.allowed, blocked: filters.blocked },
+			...(options.recencyFilter && FRESHNESS[options.recencyFilter] ? { recencyFilter: options.recencyFilter } : {}),
+		};
 	} catch (err) {
 		const message = redact(errorMessage(err), apiKey);
 		throw message === errorMessage(err) ? err : new Error(message);

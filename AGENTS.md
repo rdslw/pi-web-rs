@@ -27,6 +27,8 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 - Every response body is read under a byte cap, search answers included
 - `extra_snippets` is requested only when the caller wants content, and no more after the plan rejects it
 - A domainFilter entry that cannot be applied is reported, never dropped in silence
+- The output names every filter that was applied, and the method that applied it
+- Over budget, `web_search` drops page content before it cuts the result list
 - Only a complete extraction is cached; a failure is always retried
 - A transient Brave status is retried; a permanent one is reported at once, and no wait may exceed `search.timeoutMs`
 - Offset windows cover the text once: no gap, no overlap, and the offset always advances
@@ -34,6 +36,6 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 
 ## Testing
 
-`npm test` runs 82 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
+`npm test` runs 84 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
 
 `testConfig()` disables the page cache, because the cache lives for the life of the process and would carry a page from one test into the next. A test that needs the cache asks for it with `testConfig({ cache: { enabled: true } })` and calls `clearPageCache()` at both ends.

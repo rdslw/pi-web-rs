@@ -76,6 +76,12 @@ export const DEFAULTS = {
 		/** Characters of page content kept per result when includeContent is on. */
 		contentChars: 4_000,
 		/**
+		 * Budget for the whole web_search answer. Separate from maxInlineChars,
+		 * and smaller: a result list is a menu to choose from, not a document.
+		 * web_fetch reads any entry in full afterwards.
+		 */
+		maxOutputChars: 12_000,
+		/**
 		 * Brave extra_snippets (up to 5 excerpts per result, Pro plans only).
 		 *   "auto" — ask for them, and stop asking after the API rejects them
 		 *   "on"   — always ask, and report the rejection as an error
@@ -143,6 +149,7 @@ export interface ResolvedConfig {
 		numResults: number;
 		contentCount: number;
 		contentChars: number;
+		maxOutputChars: number;
 		extraSnippets: Tristate;
 		country: string;
 		searchLang: string;
@@ -298,6 +305,7 @@ export function loadConfig(): ResolvedConfig {
 			numResults: asNumber(search.numResults, DEFAULTS.search.numResults, 1, 20),
 			contentCount: asNumber(search.contentCount, DEFAULTS.search.contentCount, 1, 10),
 			contentChars: asNumber(search.contentChars, DEFAULTS.search.contentChars, 200, 50_000),
+			maxOutputChars: asNumber(search.maxOutputChars, DEFAULTS.search.maxOutputChars, 1_000, 200_000),
 			extraSnippets: asTristate(search.extraSnippets, DEFAULTS.search.extraSnippets),
 			country: asString(search.country) ?? DEFAULTS.search.country,
 			searchLang: asString(search.searchLang) ?? DEFAULTS.search.searchLang,

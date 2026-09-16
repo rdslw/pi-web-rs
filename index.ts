@@ -19,7 +19,7 @@ import {
 	maskKey,
 } from "./config.ts";
 import { pageCacheSize } from "./cache.ts";
-import { extraSnippetsDisabled, isBraveAvailable, searchWithBrave, type SearchResult } from "./brave.ts";
+import { extraSnippetsDisabled, isBraveAvailable, searchWithBrave, type SearchResponse, type SearchResult } from "./brave.ts";
 import { fetchMany, fetchOne, type EngineChoice } from "./fetch.ts";
 import { findContent, type FindMode } from "./find.ts";
 import { errorMessage, type ExtractedContent } from "./extract.ts";
@@ -92,6 +92,30 @@ function shorten(value: string, width: number): string {
 	return value.length > width ? `${value.slice(0, width - 3)}...` : value;
 }
 
+/**
+ * State the filters that were actually applied, and by which method. Brave has
+ * no domain parameter, so a domain filter is a query operator plus a local
+ * pass. Without this the model cannot judge what the result list means.
+ */
+export function searchNotes(response: SearchResponse, includeContent: boolean, withContent: boolean): string[] {
+	const notes: string[] = [];
+	const { allowed, blocked } = response.appliedDomainFilters;
+
+	if (response.recencyFilter) notes.push(`Freshness: ${response.recencyFilter} (Brave native)`);
+	if (allowed.length > 0) notes.push(`Domains: ${allowed.join(", ")} (site: operator, then filtered locally)`);
+	if (blocked.length > 0) notes.push(`Excluded: ${blocked.join(", ")} (NOT site: operator, then filtered locally)`);
+	// A dropped filter changes what the results mean, so it is never silent.
+	if (response.droppedDomainFilters.length > 0) {
+		notes.push(`Ignored, not valid hostnames: ${response.droppedDomainFilters.join(", ")}`);
+	}
+	if (includeContent) {
+		notes.push(response.hasExtraSnippets
+			? "Content: Brave extra snippets"
+			: withContent ? "Content: fetched pages" : "Content: omitted, output budget");
+	}
+	return notes;
+}
+
 function renderResultBlock(index: number, result: SearchResult, content?: string): string {
 	const lines = [`${index}. ${result.title}`, `   ${result.url}`];
 	// An absolute date can be compared; "3 days ago" cannot.
@@ -160,6 +184,7 @@ export default function (pi: ExtensionAPI) {
 				`  Search retries:  ${config.search.maxRetries} after a transient error`,
 				`  Extra snippets:  ${config.search.extraSnippets}${extraSnippetsDisabled() ? " (rejected by plan this session)" : ""}`,
 				`  Content pages:   ${config.search.contentCount} × ${config.search.contentChars} chars`,
+				`  Search output:   ${config.search.maxOutputChars} chars max`,
 				`  Safe search:     ${config.search.safesearch}`,
 				...(config.search.country ? [`  Country:         ${config.search.country}`] : []),
 				...(config.search.searchLang ? [`  Language:        ${config.search.searchLang}`] : []),
@@ -278,45 +303,68 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			for (const search of searches) {
-				if (search.error || !search.response) {
-					sections.push(`## ${search.query}\n\nError: ${search.error}`);
-					continue;
-				}
+			// Rendered twice when the answer does not fit: once with the page
+			// content, once without it. See the budget step below.
+			const buildSections = (withContent: boolean): string[] => searches.map(search => {
+				if (search.error || !search.response) return `## ${search.query}\n\nError: ${search.error}`;
+
 				const { results, hasExtraSnippets } = search.response;
-				for (const entry of search.response.droppedDomainFilters) droppedDomainFilters.add(entry);
-				totalResults += results.length;
-
-				if (includeContent) {
-					contentSource = hasExtraSnippets ? "extra_snippets" : contents.size > 0 ? "fetch" : contentSource;
-				}
-
 				// The shared map can hold a page that another query ranked higher.
 				// Each query still shows content for its own top contentCount only.
 				const shown = new Set(results.slice(0, contentCount).map(result => result.url));
 				const body = results.length === 0
 					? "No results."
 					: results
-						.map((result, index) => renderResultBlock(index + 1, result, shown.has(result.url) ? contents.get(result.url) : undefined))
+						.map((result, index) => renderResultBlock(
+							index + 1,
+							result,
+							withContent && shown.has(result.url) ? contents.get(result.url) : undefined,
+						))
 						.join("\n\n");
-				const note = includeContent && hasExtraSnippets ? " (content: Brave extra snippets)" : "";
-				// A dropped filter changes what the results mean, so it goes above them.
-				const warning = search.response.droppedDomainFilters.length > 0
-					? `Ignored domainFilter entries, not valid hostnames: ${search.response.droppedDomainFilters.join(", ")}\n\n`
-					: "";
-				sections.push(`## ${search.query}${note}\n\n${warning}${body}`);
+
+				const notes = searchNotes(search.response, includeContent, withContent);
+				return `## ${search.query}\n\n${notes.map(note => `${note}\n`).join("")}${notes.length > 0 ? "\n" : ""}${body}`;
+			});
+
+			for (const search of searches) {
+				if (!search.response) continue;
+				for (const entry of search.response.droppedDomainFilters) droppedDomainFilters.add(entry);
+				totalResults += search.response.results.length;
+				if (includeContent) {
+					contentSource = search.response.hasExtraSnippets
+						? "extra_snippets"
+						: contents.size > 0 ? "fetch" : contentSource;
+				}
 			}
 
-			const output = truncate(sections.join("\n\n---\n\n"), config.maxInlineChars);
+			// A result list is a menu to choose from, not a document, so it has
+			// its own budget. Page content is the first thing to go: the titles
+			// and URLs must survive, because web_fetch reads any of them in full.
+			const budget = config.search.maxOutputChars;
+			let text = buildSections(true).join("\n\n---\n\n");
+			let contentDropped = false;
+			if (text.length > budget && contents.size > 0) {
+				text = buildSections(false).join("\n\n---\n\n");
+				contentDropped = true;
+			}
+
+			const cut = text.length > budget;
+			if (cut) text = `${text.slice(0, budget)}\n\n[Output cut at ${budget} of ${text.length} chars.]`;
+			if (contentDropped || cut) {
+				text += `\n\n[${contentDropped ? "Page content was dropped to fit the budget. " : ""}` +
+					"Read any result in full with web_fetch, or lower numResults and contentCount.]";
+			}
+
 			return {
-				content: [{ type: "text", text: output.text }],
+				content: [{ type: "text", text }],
 				details: {
 					queries,
 					totalResults,
 					includeContent,
 					contentSource,
 					fetchedPages,
-					truncated: output.truncated,
+					truncated: cut,
+					contentDropped,
 					...(droppedDomainFilters.size > 0 ? { droppedDomainFilters: [...droppedDomainFilters] } : {}),
 				},
 			};

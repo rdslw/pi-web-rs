@@ -8,7 +8,7 @@ import { join } from "node:path";
 // web-rs.json cannot change the expected output.
 process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-web-rs-ext-"));
 
-import createExtension, { paginate } from "../index.ts";
+import createExtension, { paginate, searchNotes } from "../index.ts";
 
 function stubPi() {
 	const tools = new Map();
@@ -96,6 +96,41 @@ test("the offset windows cover the whole text with no gap and no overlap", () =>
 
 	assert.ok(windows > 1, "the sample must need more than one window");
 	assert.equal(rebuilt, text, "every character is returned exactly once");
+});
+
+test("the notes name each filter and the method that applied it", () => {
+	const response = {
+		query: "q",
+		results: [],
+		hasExtraSnippets: false,
+		recencyFilter: "week",
+		droppedDomainFilters: ["not a domain"],
+		appliedDomainFilters: { allowed: ["docs.example.com"], blocked: ["ads.example.org"] },
+	};
+
+	// Brave has no domain parameter, so the model must be told how the filter
+	// was really applied before it trusts the list.
+	assert.deepEqual(searchNotes(response, true, true), [
+		"Freshness: week (Brave native)",
+		"Domains: docs.example.com (site: operator, then filtered locally)",
+		"Excluded: ads.example.org (NOT site: operator, then filtered locally)",
+		"Ignored, not valid hostnames: not a domain",
+		"Content: fetched pages",
+	]);
+});
+
+test("the notes stay empty when nothing was filtered", () => {
+	const plain = {
+		query: "q",
+		results: [],
+		hasExtraSnippets: false,
+		droppedDomainFilters: [],
+		appliedDomainFilters: { allowed: [], blocked: [] },
+	};
+
+	assert.deepEqual(searchNotes(plain, false, true), []);
+	assert.deepEqual(searchNotes({ ...plain, hasExtraSnippets: true }, true, true), ["Content: Brave extra snippets"]);
+	assert.deepEqual(searchNotes(plain, true, false), ["Content: omitted, output budget"]);
 });
 
 test("an offset past the end reports the length instead of empty text", () => {
