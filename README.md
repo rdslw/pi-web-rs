@@ -101,6 +101,8 @@ Default `["http", "jina"]`: the direct fetch runs first, and Jina retries only a
 
 Terminal failures — unsupported content type, oversized body, blocked address, disabled PDF — stop the chain at once, because no other engine repairs them.
 
+The Jina engine asks for the JSON envelope and falls back to the text envelope when the server refuses it (406, 415) or ignores it. JSON is preferred for one reason: `r.jina.ai` answers HTTP 200 even when the target URL failed, and names the cause only in a `warning` field. With it the tool reports "Target URL returned error 404: Not Found" instead of "no usable content".
+
 ## Page cache
 
 An extracted page is held in memory for `cache.ttlMs`, keyed by URL and by the `engine` parameter. It removes the second request in the two common repeats: `web_search` with `includeContent` extracts a page that the model then reads with `web_fetch`, and `offset` pages through a long document.
@@ -232,7 +234,7 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 79 tests, no network access
+npm test         # 82 tests, no network access
 npm run typecheck
 ```
 

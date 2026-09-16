@@ -99,6 +99,62 @@ test("reports the Jina rate limit with the key hint", async () => {
 	assert.match(result.error ?? "", /jinaApiKey/);
 });
 
+function jinaJson(data) {
+	return new Response(JSON.stringify({ code: 200, status: 20000, data }), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+test("reads the Jina JSON envelope and takes the title from the field", async () => {
+	const fetchImpl = stubFetch(async () => jinaJson({
+		title: "Structured Title",
+		url: "https://spa.example.com/",
+		content: "The JSON envelope carries the article body as a field. ".repeat(6),
+	}));
+
+	const result = await fetchOne("https://spa.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl });
+
+	assert.equal(fetchImpl.calls[0].init.headers.Accept, "application/json");
+	assert.equal(result.error, null);
+	assert.equal(result.title, "Structured Title", "no regex over an envelope");
+	assert.match(result.content, /carries the article body/);
+});
+
+test("reports the Jina warning, because a failed target still answers 200", async () => {
+	// Jina returns HTTP 200 with content "Unknown." for a 404 target. Without
+	// the warning the model is told only that the content was unusable.
+	const fetchImpl = stubFetch(async () => jinaJson({
+		title: "",
+		url: "https://gone.example.com/",
+		content: "Unknown.",
+		warning: "Target URL returned error 404: Not Found",
+	}));
+
+	const result = await fetchOne("https://gone.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl });
+
+	assert.match(result.error ?? "", /Target URL returned error 404/);
+});
+
+test("falls back to the text envelope when JSON is refused or ignored", async () => {
+	// A server that ignores the Accept header answers 200 with the text envelope.
+	const ignored = stubFetch(async () => textResponse(READER_BODY, "text/plain"));
+	const first = await fetchOne("https://spa.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl: ignored });
+	assert.equal(ignored.calls.length, 1, "a readable body needs no second request");
+	assert.equal(first.title, "Rendered Page");
+
+	// A strict server refuses the JSON type outright.
+	const refused = stubFetch(async (_url, init) => init.headers.Accept === "application/json"
+		? new Response("not acceptable", { status: 406 })
+		: textResponse(READER_BODY, "text/plain"));
+	const second = await fetchOne("https://spa.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl: refused });
+
+	assert.equal(refused.calls.length, 2);
+	assert.equal(refused.calls[1].init.headers.Accept, "text/plain");
+	assert.equal(second.error, null);
+	assert.equal(second.title, "Rendered Page");
+});
+
 test("asks Jina to drop images, and bypasses its cache only on request", async () => {
 	const fetchImpl = stubFetch(async () => textResponse(READER_BODY, "text/plain"));
 	await fetchOne("https://spa.example.com/", { engine: "jina", config: testConfig(), lookup: publicLookup, fetchImpl });

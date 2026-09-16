@@ -13,7 +13,7 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 | `fetch.ts` | Engine chain: order, fallback, terminal-error stop, parallel fetches, cache lookup |
 | `cache.ts` | Page cache: LRU with TTL, keyed by URL and engine choice |
 | `extract.ts` | HTTP engine: Readability + Turndown, unpdf, text passthrough, size limits |
-| `jina.ts` | Jina Reader engine |
+| `jina.ts` | Jina Reader engine: JSON envelope, text envelope fallback |
 | `brave.ts` | Brave Search API, domain operators, extra_snippets plan detection |
 | `find.ts` | In-page find with context windows |
 | `ssrf.ts` | Outbound URL guard, redirect revalidation, domain policy |
@@ -34,6 +34,6 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 
 ## Testing
 
-`npm test` runs 79 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
+`npm test` runs 82 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
 
 `testConfig()` disables the page cache, because the cache lives for the life of the process and would carry a page from one test into the next. A test that needs the cache asks for it with `testConfig({ cache: { enabled: true } })` and calls `clearPageCache()` at both ends.
