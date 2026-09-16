@@ -157,6 +157,7 @@ export default function (pi: ExtensionAPI) {
 				`  Concurrency:     ${config.concurrency}`,
 				"",
 				`  Search results:  ${config.search.numResults}`,
+				`  Search retries:  ${config.search.maxRetries} after a transient error`,
 				`  Extra snippets:  ${config.search.extraSnippets}${extraSnippetsDisabled() ? " (rejected by plan this session)" : ""}`,
 				`  Content pages:   ${config.search.contentCount} × ${config.search.contentChars} chars`,
 				`  Safe search:     ${config.search.safesearch}`,

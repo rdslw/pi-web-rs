@@ -4,7 +4,7 @@ Web search and web fetch for the [Pi coding agent](https://github.com/earendil-w
 
 ## Origin
 
-pi-web-rs is a fork-down of **pi-web-access** by Nico Bailon, taken from v0.29.0 (commit `192ac18`, 2026-09-10) on 2026-09-14. Upstream carries 30+ search providers, a browser curator, GitHub and YouTube tools, and about 60 source files; this fork keeps two tools and eight.
+pi-web-rs is a fork-down of **pi-web-access** by Nico Bailon, taken from v0.29.0 (commit `192ac18`, 2026-09-10) on 2026-09-14. Upstream carries 30+ search providers, a browser curator, GitHub and YouTube tools, and about 60 source files; this fork keeps two tools and nine.
 
 The modules are reduced rewrites of their upstream counterparts, not copies. Two are close ports: `find.ts` follows `content-find.ts` almost line for line, and `ssrf.ts` keeps the address rules and redirect handling of `ssrf-protection.ts`. `fetch.ts` and `config.ts` have no upstream counterpart. Per-file provenance, the list of upstream subsystems left out, and the procedure for porting a later upstream change are in [UPSTREAM.md](UPSTREAM.md).
 
@@ -59,6 +59,12 @@ Brave has no domain parameter, so `domainFilter` becomes `site:` and `NOT site:`
 2. If the plan rejects it (HTTP 422), the extension retries once without the parameter, remembers the plan limit for the session, and fetches the top `contentCount` pages through the fetch chain instead. With several queries the page list is deduplicated first, so a URL that two queries rank is fetched once.
 
 `search.extraSnippets` in the config controls this: `auto` (the behaviour above), `on` (report the rejection as an error), `off` (never ask; always fetch the pages).
+
+### Transient failures
+
+A Brave answer of 408, 429, or 5xx, and a network error, are treated as temporary: the request runs again, up to `search.maxRetries` times. The wait comes from the `Retry-After` header when Brave sends one, and from a 500 ms, 1 000 ms backoff when it does not.
+
+The total wait is capped by `search.timeoutMs`. A `Retry-After` longer than that budget is not waited out; the error reports the delay so that the model can decide to ask again later. A 4xx status other than 408 and 429 is the fault of the request, so it is reported at once.
 
 ## Tool: `web_fetch`
 
@@ -149,6 +155,7 @@ Written with defaults by `/webrs init`:
   "jinaNoCache": false,
   "search": {
     "timeoutMs": 10000,
+    "maxRetries": 2,
     "numResults": 5,
     "contentCount": 3,
     "contentChars": 4000,
@@ -193,6 +200,7 @@ Written with defaults by `/webrs init`:
 | `userAgent` | string | Chrome UA | User-Agent header for direct HTTP fetches |
 | `untrustedContentPrompt` | boolean | `true` | Append the untrusted-content note to the system prompt |
 | `search.timeoutMs` | integer | `10000` | Brave request budget in ms (1 000–300 000) |
+| `search.maxRetries` | integer | `2` | Extra attempts after a transient Brave failure (0–5) |
 | `search.numResults` | integer | `5` | Results per query (1–20) |
 | `search.contentCount` | integer | `3` | Result pages fetched when `includeContent` is on (1–10) |
 | `search.contentChars` | integer | `4000` | Characters of page content kept per result (200–50 000) |
@@ -224,7 +232,7 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 74 tests, no network access
+npm test         # 79 tests, no network access
 npm run typecheck
 ```
 

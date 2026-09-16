@@ -137,6 +137,72 @@ test("extraSnippets \"off\" never asks for the parameter", async () => {
 	assert.equal(new URL(fetchImpl.calls[0].url).searchParams.has("extra_snippets"), false);
 });
 
+test("retries a transient failure and waits the Retry-After", async () => {
+	const waits = [];
+	const fetchImpl = stubFetch(async (_url, _init, call) => call === 1
+		? new Response("slow down", { status: 429, headers: { "retry-after": "2" } })
+		: braveResponse(RESULTS));
+
+	const response = await searchWithBrave("q", {
+		config: testConfig(),
+		fetchImpl,
+		sleep: async (ms) => { waits.push(ms); },
+	});
+
+	assert.equal(fetchImpl.calls.length, 2);
+	assert.deepEqual(waits, [2000], "the wait comes from Retry-After, not from the backoff");
+	assert.equal(response.results.length, 2);
+});
+
+test("falls back to the backoff when Brave sends no Retry-After", async () => {
+	const waits = [];
+	const fetchImpl = stubFetch(async (_url, _init, call) => call < 3
+		? new Response("busy", { status: 503 })
+		: braveResponse(RESULTS));
+
+	await searchWithBrave("q", { config: testConfig(), fetchImpl, sleep: async (ms) => { waits.push(ms); } });
+
+	assert.equal(fetchImpl.calls.length, 3, "two retries, the configured maximum");
+	assert.deepEqual(waits, [500, 1000]);
+});
+
+test("does not retry a permanent failure", async () => {
+	const fetchImpl = stubFetch(async () => new Response("bad request", { status: 400 }));
+
+	await assert.rejects(
+		searchWithBrave("q", { config: testConfig(), fetchImpl, sleep: async () => {} }),
+		/Brave Search API error 400/,
+	);
+	assert.equal(fetchImpl.calls.length, 1, "a 400 is the request's fault; a second attempt fails the same way");
+});
+
+test("reports a Retry-After that is longer than the search budget instead of waiting", async () => {
+	const waits = [];
+	const fetchImpl = stubFetch(async () => new Response("slow down", { status: 429, headers: { "retry-after": "600" } }));
+
+	await assert.rejects(
+		searchWithBrave("q", { config: testConfig(), fetchImpl, sleep: async (ms) => { waits.push(ms); } }),
+		(err) => {
+			// Blocking the agent for ten minutes is worse than reporting the wait.
+			assert.match(err.message, /temporary/);
+			assert.match(err.message, /Retry after 600 s/);
+			return true;
+		},
+	);
+	assert.equal(fetchImpl.calls.length, 1);
+	assert.deepEqual(waits, []);
+});
+
+test("maxRetries 0 turns the retry off", async () => {
+	const fetchImpl = stubFetch(async () => new Response("busy", { status: 503 }));
+
+	await assert.rejects(
+		searchWithBrave("q", { config: testConfig({ search: { maxRetries: 0 } }), fetchImpl, sleep: async () => {} }),
+		/503/,
+	);
+	assert.equal(fetchImpl.calls.length, 1);
+});
+
 test("reports other API errors and keeps the key out of the message", async () => {
 	const fetchImpl = stubFetch(async () => new Response("bad token test-key rejected", { status: 401 }));
 

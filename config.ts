@@ -63,6 +63,12 @@ export const DEFAULTS = {
 		 * search is one small JSON call, and the agent waits with nothing to show.
 		 */
 		timeoutMs: 10_000,
+		/**
+		 * Extra attempts after a transient Brave failure (408, 429, 5xx, network
+		 * error). The wait comes from Retry-After when Brave sends it, and the
+		 * whole wait is capped by search.timeoutMs.
+		 */
+		maxRetries: 2,
 		/** Results per query. Brave allows 1 to 20. */
 		numResults: 5,
 		/** Result pages fetched when includeContent is on and Brave gives no extra snippets. */
@@ -133,6 +139,7 @@ export interface ResolvedConfig {
 	jinaNoCache: boolean;
 	search: {
 		timeoutMs: number;
+		maxRetries: number;
 		numResults: number;
 		contentCount: number;
 		contentChars: number;
@@ -287,6 +294,7 @@ export function loadConfig(): ResolvedConfig {
 		jinaNoCache: asBoolean(file.jinaNoCache, DEFAULTS.jinaNoCache),
 		search: {
 			timeoutMs: asNumber(search.timeoutMs, DEFAULTS.search.timeoutMs, 1_000, 300_000),
+			maxRetries: asNumber(search.maxRetries, DEFAULTS.search.maxRetries, 0, 5),
 			numResults: asNumber(search.numResults, DEFAULTS.search.numResults, 1, 20),
 			contentCount: asNumber(search.contentCount, DEFAULTS.search.contentCount, 1, 10),
 			contentChars: asNumber(search.contentChars, DEFAULTS.search.contentChars, 200, 50_000),

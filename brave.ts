@@ -7,7 +7,7 @@
  */
 
 import { loadConfig, type ResolvedConfig } from "./config.ts";
-import { errorMessage, readTextWithLimit } from "./extract.ts";
+import { errorMessage, isAbortError, readTextWithLimit } from "./extract.ts";
 
 const BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 
@@ -45,7 +45,32 @@ export interface BraveSearchOptions {
 	signal?: AbortSignal;
 	config?: ResolvedConfig;
 	fetchImpl?: typeof fetch;
+	/** Test seam. Replaces the wait between retries. */
+	sleep?: (ms: number) => Promise<void>;
 }
+
+/** Failures that a second attempt can repair: the fault is at the API, not in the request. */
+function isTransientStatus(status: number): boolean {
+	return status === 408 || status === 429 || status >= 500;
+}
+
+/** Retry-After is either a count of seconds or an HTTP date. */
+function parseRetryAfter(value: string | null, now = Date.now()): number | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+
+	const date = Date.parse(trimmed);
+	if (Number.isNaN(date)) return null;
+	return Math.max(0, date - now);
+}
+
+/** 500 ms, then 1 000 ms, and so on. No jitter: one client, and tests stay readable. */
+function backoffDelay(attempt: number): number {
+	return 500 * 2 ** attempt;
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const FRESHNESS: Record<string, string> = { day: "pd", week: "pw", month: "pm", year: "py" };
 
@@ -132,6 +157,17 @@ function matchesFilters(url: string, filters: DomainFilters): boolean {
 
 function redact(text: string, apiKey: string): string {
 	return apiKey ? text.split(apiKey).join("***") : text;
+}
+
+/**
+ * A transient status is reported with its Retry-After, so the model can decide
+ * to wait and ask again instead of treating the search as impossible.
+ */
+function apiError(response: Response, body: string): string {
+	const retryAfter = isTransientStatus(response.status) ? parseRetryAfter(response.headers.get("retry-after")) : null;
+	const hint = retryAfter === null ? "" : ` Retry after ${Math.ceil(retryAfter / 1000)} s.`;
+	const label = isTransientStatus(response.status) ? " (temporary)" : "";
+	return `Brave Search API error ${response.status}${label}: ${body.slice(0, 300)}${hint}`;
 }
 
 /** Read an error body under a cap, redacted. An oversized error body is not worth a failure of its own. */
@@ -228,8 +264,43 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 		});
 	};
 
+	const sleep = options.sleep ?? defaultSleep;
+	// Budget for the whole wait. A Retry-After longer than one search budget is
+	// reported to the caller instead of blocking the agent for a minute.
+	let waitLeft = config.search.timeoutMs;
+
+	/**
+	 * Run one request, and try again after a transient failure. A retry is not
+	 * started when the wait would break the budget: the status is returned and
+	 * the normal error path reports it, Retry-After included.
+	 */
+	const runWithRetry = async (withExtraSnippets: boolean): Promise<Response> => {
+		for (let attempt = 0; ; attempt++) {
+			let response: Response;
+			try {
+				response = await run(withExtraSnippets);
+			} catch (err) {
+				// A network error is transient; an abort is the caller's decision.
+				if (attempt >= config.search.maxRetries || isAbortError(err) || options.signal?.aborted) throw err;
+				const delay = Math.min(backoffDelay(attempt), waitLeft);
+				if (delay <= 0) throw err;
+				waitLeft -= delay;
+				await sleep(delay);
+				continue;
+			}
+
+			if (response.ok || !isTransientStatus(response.status) || attempt >= config.search.maxRetries) return response;
+			if (options.signal?.aborted) return response;
+
+			const delay = parseRetryAfter(response.headers.get("retry-after")) ?? backoffDelay(attempt);
+			if (delay > waitLeft) return response;
+			waitLeft -= delay;
+			await sleep(delay);
+		}
+	};
+
 	try {
-		let response = await run(askExtraSnippets);
+		let response = await runWithRetry(askExtraSnippets);
 
 		if (!response.ok && askExtraSnippets) {
 			const body = await readErrorBody(response, apiKey);
@@ -242,15 +313,15 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 				}
 				// "auto": remember the plan limit and retry once without the parameter.
 				extraSnippetsRejected = true;
-				response = await run(false);
+				response = await runWithRetry(false);
 			} else {
-				throw new Error(`Brave Search API error ${response.status}: ${body.slice(0, 300)}`);
+				throw new Error(apiError(response, body));
 			}
 		}
 
 		if (!response.ok) {
 			const body = await readErrorBody(response, apiKey);
-			throw new Error(`Brave Search API error ${response.status}: ${body.slice(0, 300)}`);
+			throw new Error(apiError(response, body));
 		}
 
 		const data = JSON.parse(await readTextWithLimit(response, MAX_BODY_BYTES)) as { web?: { results?: BraveWebResult[] } };
