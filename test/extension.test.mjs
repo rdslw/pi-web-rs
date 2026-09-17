@@ -155,7 +155,7 @@ test("renderCall summarizes the call for the transcript", () => {
 test("/webrs show reports the active chain without leaking the key", async () => {
 	const pi = stubPi();
 	createExtension(pi);
-	process.env.PI_WEB_RS_BRAVE_API_KEY = "abcd12345678wxyz";
+	process.env.BRAVE_API_KEY = "abcd12345678wxyz";
 
 	await pi.commands.get("webrs").handler("show", {});
 	const text = pi.messages.at(-1).content[0].text;
@@ -163,7 +163,7 @@ test("/webrs show reports the active chain without leaking the key", async () =>
 	assert.match(text, /Fetch chain: +http → jina/);
 	assert.match(text, /Brave API key: +abcd\.\.\.wxyz/);
 	assert.doesNotMatch(text, /abcd12345678wxyz/);
-	delete process.env.PI_WEB_RS_BRAVE_API_KEY;
+	delete process.env.BRAVE_API_KEY;
 });
 
 test("web_fetch returns partial content with a note instead of only an error", async () => {

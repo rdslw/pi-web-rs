@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DEFAULTS, configTemplate, parseFetchChain } from "../config.ts";
 
-test("parses a fetch chain from an array or a comma separated string", () => {
+test("parses a fetch chain from an array", () => {
 	assert.deepEqual(parseFetchChain(["jina", "http"], DEFAULTS.fetchChain), ["jina", "http"]);
-	assert.deepEqual(parseFetchChain("jina,http", DEFAULTS.fetchChain), ["jina", "http"]);
-	assert.deepEqual(parseFetchChain(" HTTP , jina ", DEFAULTS.fetchChain), ["http", "jina"]);
+	assert.deepEqual(parseFetchChain([" HTTP ", "jina"], DEFAULTS.fetchChain), ["http", "jina"]);
 	assert.deepEqual(parseFetchChain(["http"], DEFAULTS.fetchChain), ["http"]);
+	assert.deepEqual(parseFetchChain("jina,http", DEFAULTS.fetchChain), DEFAULTS.fetchChain, "a string is not a chain: the file holds an array");
 });
 
 test("drops unknown and duplicate engines", () => {
@@ -37,6 +37,39 @@ test("configTemplate includes all defaults and configurable keys", () => {
 	assert.deepEqual(template.domainPolicy, { allow: [], deny: [] });
 });
 
+/** Every configurable key as a flat "section.key" map, the shape README documents. */
+function flatTemplate() {
+	const flat = new Map();
+	for (const [key, value] of Object.entries(configTemplate())) {
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			for (const [sub, subValue] of Object.entries(value)) flat.set(`${key}.${sub}`, subValue);
+		} else {
+			flat.set(key, value);
+		}
+	}
+	return flat;
+}
+
+test("README documents every config key with its real default", () => {
+	// The options table is the only complete view a user has of the config, so a
+	// key added to DEFAULTS and not to README is a silent gap.
+	const readme = readFileSync(new URL("../README.md", import.meta.url), "utf-8");
+	const example = readme.slice(readme.indexOf("### Full configuration"), readme.indexOf("### Options reference"));
+	const rows = readme.slice(readme.indexOf("### Options reference"));
+	const documented = new Map([...rows.matchAll(/^\| `([\w.]+)` \| [^|]+\| ([^|]+)\|/gm)].map(([, key, value]) => [key, value]));
+
+	const template = flatTemplate();
+	for (const [key, value] of template) {
+		assert.ok(documented.has(key), `${key} is missing from the options reference`);
+		assert.ok(example.includes(`"${key.split(".").pop()}"`), `${key} is missing from the full configuration example`);
+		// The table states the browser for userAgent, not the whole header.
+		if (key === "userAgent") continue;
+		const shown = documented.get(key).replaceAll(" ", "");
+		assert.ok(shown.includes(JSON.stringify(value).replaceAll(" ", "")), `${key}: README says ${shown}, DEFAULTS says ${JSON.stringify(value)}`);
+	}
+	assert.deepEqual([...documented.keys()].filter(key => !template.has(key)), [], "the table documents a key the config does not have");
+});
+
 test("the JSON file overrides the in-source defaults, and the environment overrides the file", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-rs-"));
 	writeFileSync(join(dir, "web-rs.json"), JSON.stringify({
@@ -49,7 +82,7 @@ test("the JSON file overrides the in-source defaults, and the environment overri
 	// getConfigDir caches per process, so the module is imported in a child
 	// environment through a fresh import with the env var already set.
 	process.env.PI_CODING_AGENT_DIR = dir;
-	t.after(() => { delete process.env.PI_CODING_AGENT_DIR; delete process.env.PI_WEB_RS_FETCH_CHAIN; delete process.env.PI_WEB_RS_BRAVE_API_KEY; });
+	t.after(() => { delete process.env.PI_CODING_AGENT_DIR; delete process.env.BRAVE_API_KEY; });
 
 	const { loadConfig } = await import(`../config.ts?case=${Date.now()}`);
 	const fromFile = loadConfig();
@@ -59,11 +92,11 @@ test("the JSON file overrides the in-source defaults, and the environment overri
 	assert.equal(fromFile.search.numResults, 9);
 	assert.equal(fromFile.maxInlineChars, DEFAULTS.maxInlineChars, "unset keys keep the in-source default");
 
-	process.env.PI_WEB_RS_FETCH_CHAIN = "http";
-	process.env.PI_WEB_RS_BRAVE_API_KEY = "env-key";
+	// The API keys are the only values an environment variable can set.
+	process.env.BRAVE_API_KEY = "env-key";
 	const fromEnv = loadConfig();
-	assert.deepEqual(fromEnv.fetchChain, ["http"]);
 	assert.equal(fromEnv.braveApiKey, "env-key");
+	assert.deepEqual(fromEnv.fetchChain, ["jina"], "every other key comes from the file");
 });
 
 test("out-of-range numbers fall back to the defaults", async () => {

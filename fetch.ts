@@ -1,7 +1,7 @@
 /**
  * Fetch chain. The engine order comes from config.fetchChain (DEFAULTS in
- * config.ts, overridable by web-rs.json or PI_WEB_RS_FETCH_CHAIN); a tool call
- * can override it with engine: "http" or engine: "jina".
+ * config.ts, overridable by web-rs.json); a tool call can override it with
+ * engine: "http" or engine: "jina".
  */
 
 import pLimit from "p-limit";

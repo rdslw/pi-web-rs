@@ -255,15 +255,12 @@ function asSafeSearch(value: unknown, fallback: SafeSearch): SafeSearch {
 	return value === "off" || value === "moderate" || value === "strict" ? value : fallback;
 }
 
-/** Parse an engine list from a config value or a comma separated env var. */
+/** Parse an engine list from a config value, dropping unknown and repeated entries. */
 export function parseFetchChain(value: unknown, fallback: FetchEngine[]): FetchEngine[] {
-	const entries = typeof value === "string"
-		? value.split(",")
-		: Array.isArray(value) ? value : null;
-	if (!entries) return fallback;
+	if (!Array.isArray(value)) return fallback;
 
 	const chain: FetchEngine[] = [];
-	for (const entry of entries) {
+	for (const entry of value) {
 		if (typeof entry !== "string") continue;
 		const engine = entry.trim().toLowerCase();
 		if ((engine === "http" || engine === "jina") && !chain.includes(engine)) chain.push(engine);
@@ -285,12 +282,9 @@ export function loadConfig(): ResolvedConfig {
 	const domainPolicy = section(file, "domainPolicy");
 
 	return {
-		braveApiKey: asString(process.env.PI_WEB_RS_BRAVE_API_KEY) ?? asString(file.braveApiKey) ?? asString(process.env.BRAVE_API_KEY),
-		jinaApiKey: asString(process.env.PI_WEB_RS_JINA_API_KEY) ?? asString(file.jinaApiKey) ?? asString(process.env.JINA_API_KEY),
-		fetchChain: parseFetchChain(
-			process.env.PI_WEB_RS_FETCH_CHAIN ?? file.fetchChain,
-			DEFAULTS.fetchChain,
-		),
+		braveApiKey: asString(process.env.BRAVE_API_KEY) ?? asString(file.braveApiKey),
+		jinaApiKey: asString(process.env.JINA_API_KEY) ?? asString(file.jinaApiKey),
+		fetchChain: parseFetchChain(file.fetchChain, DEFAULTS.fetchChain),
 		timeoutMs: asNumber(file.timeoutMs, DEFAULTS.timeoutMs, 1_000, 300_000),
 		maxResponseBytes: asNumber(file.maxResponseBytes, DEFAULTS.maxResponseBytes, 64 * 1024, 100 * 1024 * 1024),
 		maxInlineChars: asNumber(file.maxInlineChars, DEFAULTS.maxInlineChars, 1_000, 500_000),

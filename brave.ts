@@ -224,7 +224,7 @@ export async function searchWithBrave(query: string, options: BraveSearchOptions
 		throw new Error(
 			"Brave Search API key not found. Either:\n" +
 			'  1. Put { "braveApiKey": "your-key" } in web-rs.json (see /webrs init)\n' +
-			"  2. Set BRAVE_API_KEY or PI_WEB_RS_BRAVE_API_KEY\n" +
+			"  2. Export BRAVE_API_KEY\n" +
 			"Get a key at https://brave.com/search/api/",
 		);
 	}

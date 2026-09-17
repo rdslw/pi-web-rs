@@ -32,7 +32,8 @@ What the code must keep true. A test guards each one unless the line says otherw
 - The output names every filter that was applied, and the method that applied it
 - Only a complete extraction is cached
 - Offset windows cover the text once: no gap, no overlap, and the offset always advances
-- Config precedence is environment > file > `DEFAULTS`
+- Config precedence is environment > file > `DEFAULTS`, and the two API keys are the only values the environment sets
+- README.md sections about configuration closely match source code
 
 ## Testing
 

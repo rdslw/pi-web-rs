@@ -119,7 +119,7 @@ The window is cut at a paragraph or line break, not inside a word. The page stay
 
 ## Extraction chain
 
-The order lives in `fetchChain`. It is an editable constant in `config.ts`, overridable by `web-rs.json` and by `PI_WEB_RS_FETCH_CHAIN`, and overridable per call with the `engine` parameter.
+The order lives in `fetchChain`. It is an editable constant in `config.ts`, overridable by `web-rs.json`, and overridable per call with the `engine` parameter.
 
 Default `["http", "jina"]`: the direct fetch runs first, and Jina retries only after a recoverable failure (HTTP error, bot block, JavaScript-rendered page, extraction below `minUsefulChars`).
 
@@ -150,10 +150,11 @@ Only a complete extraction is stored. A failure is never cached, because a block
 ## Configuration
 
 Precedence (highest to lowest):
-1. **Own environment variables**: `PI_WEB_RS_BRAVE_API_KEY`, `PI_WEB_RS_JINA_API_KEY`, `PI_WEB_RS_FETCH_CHAIN`
+1. **Environment variables**: `BRAVE_API_KEY`, `JINA_API_KEY` — the API keys only
 2. **File**: `web-rs.json` (generated with defaults by `/webrs init`)
-3. **Shared key variables**: `BRAVE_API_KEY`, `JINA_API_KEY` — below the file on purpose, so a key in `web-rs.json` wins over a key exported for another tool
-4. **Defaults**: in-source `DEFAULTS` block in `config.ts`
+3. **Defaults**: in-source `DEFAULTS` block in `config.ts`
+
+The keys use the vendors' own variable names, so a key already exported for another tool is found with no extra setup. Every other setting comes from the file or from the tool call, never from the environment.
 
 ### File location
 
@@ -225,7 +226,7 @@ Written with defaults by `/webrs init`:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `braveApiKey` | string | `""` | Brave Search API key (or set `BRAVE_API_KEY` env var) |
-| `jinaApiKey` | string | `""` | Optional Jina Reader API key for higher rate limits |
+| `jinaApiKey` | string | `""` | Optional Jina Reader API key for higher rate limits (or set `JINA_API_KEY` env var) |
 | `fetchChain` | string[] | `["http", "jina"]` | Extraction order: `"http"`, `"jina"`, or fallback order |
 | `timeoutMs` | integer | `30000` | Fetch budget per attempt in ms (1 000–300 000) |
 | `jinaNoCache` | boolean | `false` | Send `X-No-Cache` to force a new Jina render (slower, costs rate limit) |
