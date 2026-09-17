@@ -1,14 +1,16 @@
 # pi-web-rs
 
-Web search and web fetch for the [Pi coding agent](https://github.com/earendil-works/pi). Two tools, one command, nine source files. It is a deliberate subset of [pi-web-access](https://github.com/nicobailon/pi-web-access): Brave for search, HTTP or Jina for fetch, unpdf for PDF.
+Web search and web fetch for the [Pi coding agent](https://github.com/earendil-works/pi). Two tools, one command, nine source files. It is a deliberate subset of its ancestor pi-web-access: Brave for search, HTTP or Jina for fetch, unpdf for PDF.
 
 ## Origin
 
-pi-web-rs is a fork-down of **pi-web-access** by Nico Bailon, taken from v0.29.0 (commit `192ac18`, 2026-09-10) on 2026-09-14. Upstream carries 30+ search providers, a browser curator, GitHub and YouTube tools, and about 60 source files; this fork keeps two tools and nine.
+pi-web-rs has two upstreams, with different roles.
 
-The modules are reduced rewrites of their upstream counterparts, not copies. Two are close ports: `find.ts` follows `content-find.ts` almost line for line, and `ssrf.ts` keeps the address rules and redirect handling of `ssrf-protection.ts`. `fetch.ts` and `config.ts` have no upstream counterpart. Per-file provenance, the list of upstream subsystems left out, and the procedure for porting a later upstream change are in [UPSTREAM.md](UPSTREAM.md).
+**[pi-web-access](https://github.com/nicobailon/pi-web-access)** by Nico Bailon (MIT) is the ancestor. pi-web-rs is a fork-down of v0.29.0 (commit `192ac18`, 2026-09-10), taken on 2026-09-14. That project carries 30+ search providers, a browser curator, GitHub and YouTube tools, and about 60 source files; this fork keeps two tools and nine. The modules are reduced rewrites of their counterparts there, not copies. Two are close ports: `find.ts` follows `content-find.ts` almost line for line, and `ssrf.ts` keeps the address rules and redirect handling of `ssrf-protection.ts`. `fetch.ts`, `config.ts`, and `cache.ts` have no counterpart. Code may be ported from it.
 
-Licensed MIT, as upstream is.
+**[@counterposition/pi-web-search](https://pi.dev/packages/@counterposition/pi-web-search)** (GPL-3.0-only) is a design source. It was read at 0.5.3 in a review on 2026-09-17 that gave, among other changes, the untrusted-content prompt, the internal-name deny list, bounded response bodies, the page cache, `offset` pagination, the transient-failure retry, the Jina JSON envelope, and the search output budget. **No code is copied from it.** What is taken is observed behaviour, API facts, and design decisions, written here in this codebase's own terms.
+
+Per-source provenance, what was left out of each, and the procedure for the next port are in [UPSTREAM.md](UPSTREAM.md). Each port is decided with the user, not applied on its own.
 
 ## Install
 
@@ -143,14 +145,23 @@ Only a complete extraction is stored. A failure is never cached, because a block
 ## Command: `/webrs [show|init]`
 
 - `/webrs` or `/webrs show` — keys masked, active chain, limits, page cache use, and whether the Brave plan rejected extra snippets this session
-- `/webrs init` — write `~/.pi/agent/web-rs.json` with the defaults, mode 0600
+- `/webrs init` — write the config file with the defaults, mode 0600 (`~/.pi/agent/web-rs.json`, unless the [file location](#file-location) rules choose another path)
 
 ## Configuration
 
 Precedence (highest to lowest):
-1. **Environment variables**: `PI_WEB_RS_BRAVE_API_KEY`, `BRAVE_API_KEY`, `PI_WEB_RS_JINA_API_KEY`, `JINA_API_KEY`, `PI_WEB_RS_FETCH_CHAIN`
-2. **File**: `~/.pi/agent/web-rs.json` (generated with defaults by `/webrs init`)
-3. **Defaults**: in-source `DEFAULTS` block in `config.ts`
+1. **Own environment variables**: `PI_WEB_RS_BRAVE_API_KEY`, `PI_WEB_RS_JINA_API_KEY`, `PI_WEB_RS_FETCH_CHAIN`
+2. **File**: `web-rs.json` (generated with defaults by `/webrs init`)
+3. **Shared key variables**: `BRAVE_API_KEY`, `JINA_API_KEY` — below the file on purpose, so a key in `web-rs.json` wins over a key exported for another tool
+4. **Defaults**: in-source `DEFAULTS` block in `config.ts`
+
+### File location
+
+`/webrs show` prints the path in use. It is chosen in this order:
+
+1. `$PI_CODING_AGENT_DIR/web-rs.json`, when that variable is set
+2. `$XDG_CONFIG_HOME/pi/web-rs.json`, when `XDG_CONFIG_HOME` is set — but `~/.pi/web-rs.json` is kept if that older file exists and the XDG one does not
+3. `~/.pi/agent/web-rs.json`
 
 ### Minimal config
 
@@ -258,11 +269,13 @@ The Brave key is never printed: `/webrs show` masks it and API error text is red
 
 ```bash
 npm install      # dev tree, ~217 MB: adds the pi packages and TypeScript
-npm test         # 84 tests, no network access
+npm test         # no network access
 npm run typecheck
 ```
 
 The tests stub `fetch` and DNS through the `fetchImpl` and `lookup` seams, so no test touches the network.
+
+A change taken from an upstream follows [UPSTREAM.md](UPSTREAM.md): code may be ported from pi-web-access, design only from pi-web-search.
 
 ## Dependencies
 

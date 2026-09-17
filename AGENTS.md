@@ -18,7 +18,9 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 | `find.ts` | In-page find with context windows |
 | `ssrf.ts` | Outbound URL guard, redirect revalidation, domain policy |
 
-## Rules that the tests enforce
+## Invariants
+
+What the code must keep true. A test guards each one unless the line says otherwise. Breaking one is a design change, not a fix: raise it with the user first. List is not complete, there is more invariants.
 
 - Every outbound URL goes through `ssrf.ts`, including the target of a Jina request
 - Credentials in a URL and internal names are rejected before DNS is asked
@@ -28,14 +30,16 @@ A small web access extension for the Pi agent: Brave search and readable web fet
 - `extra_snippets` is requested only when the caller wants content, and no more after the plan rejects it
 - A domainFilter entry that cannot be applied is reported, never dropped in silence
 - The output names every filter that was applied, and the method that applied it
-- Over budget, `web_search` drops page content before it cuts the result list
-- Only a complete extraction is cached; a failure is always retried
-- A transient Brave status is retried; a permanent one is reported at once, and no wait may exceed `search.timeoutMs`
+- Only a complete extraction is cached
 - Offset windows cover the text once: no gap, no overlap, and the offset always advances
 - Config precedence is environment > file > `DEFAULTS`
 
 ## Testing
 
-`npm test` runs 84 tests with no network access. New code needs the same seams: `fetchImpl` for the transport and `lookup` for DNS. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
+`npm test` runs the whole suite; `node --test test/ssrf.test.mjs` runs one file. No test reaches the network.
+
+Two seams keep the network out: `fetchImpl` for the transport and `lookup` for DNS. New code needs both. A test must never depend on the user's `web-rs.json`; set `PI_CODING_AGENT_DIR` to a temporary directory instead.
 
 `testConfig()` disables the page cache, because the cache lives for the life of the process and would carry a page from one test into the next. A test that needs the cache asks for it with `testConfig({ cache: { enabled: true } })` and calls `clearPageCache()` at both ends.
+
+Prefer a test that states an invariant over one that repeats the implementation: `paginate` is checked by rebuilding the source text from its windows, not by re-deriving the offset arithmetic.
