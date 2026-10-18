@@ -44,3 +44,14 @@ Two seams keep the network out: `fetchImpl` for the transport and `lookup` for D
 `testConfig()` disables the page cache, because the cache lives for the life of the process and would carry a page from one test into the next. A test that needs the cache asks for it with `testConfig({ cache: { enabled: true } })` and calls `clearPageCache()` at both ends.
 
 Prefer a test that states an invariant over one that repeats the implementation: `paginate` is checked by rebuilding the source text from its windows, not by re-deriving the offset arithmetic.
+
+## Release
+
+The procedure is the "Release" section of INSTALL.md. Follow it as written.
+
+- A version is only in `package.json`, `package-lock.json`, and the git tag.
+- The version commit is `ver: X.Y.Z` and changes `package.json` and `package-lock.json` only. Other changes go into earlier commits.
+- The tag is annotated (`git tag -a vX.Y.Z -m "pi-web-rs X.Y.Z"`), never lightweight, and is on the version commit.
+- `package-lock.json` is tracked, because `pi install git:` installs from it. Commit it with every dependency change.
+- Before the version commit: `npm run typecheck && npm test` must pass, and the tracked files must have no changes.
+- Push the branch or the tag only when the user asks. Tell the user about a change that users must act on, and propose a line for the tag message.
