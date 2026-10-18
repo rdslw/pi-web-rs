@@ -1,6 +1,6 @@
 {
   "name": "pi-web-rs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Brave web search and readable web fetch (HTTP/Readability, Jina Reader, PDF) for the Pi coding agent",
   "type": "module",
   "scripts": {
