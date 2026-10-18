@@ -30,7 +30,7 @@ Per file. Logic added later is marked **Local**, because a port shall keep it.
 | `brave.ts` | `brave.ts` | Same query building and domain filters; adds `extra_snippets` with plan detection, `text_decorations=0`, country and language. **Local:** `result_filter=web`, `page_age` dates, transient-failure retry, applied-filter reporting, bounded body read |
 | `ssrf.ts` | `ssrf-protection.ts` | Same address rules and redirect revalidation; no env-proxy trust, no loopback exemption, no config parsing (it takes options). **Local:** URL credentials rejected, internal-name suffix deny list before DNS |
 | `find.ts` | `content-find.ts` | Near-verbatim port. Unchanged since the fork |
-| `config.ts` | `utils.ts` (`getWebSearchConfigDir`), `pdf-extract.ts` (`loadPDFConfig`) | New file: `web-rs.json`, `DEFAULTS` block, environment precedence |
+| `config.ts` | `pdf-extract.ts` (`loadPDFConfig`) | New file: `web-rs.json`, `DEFAULTS` block, environment precedence. **Local:** the file path comes from pi's `getAgentDir()`, not from upstream `getWebSearchConfigDir` (no XDG or `~/.pi` fallback) |
 | `index.ts` | `index.ts` (`web_search` and `fetch_content` registration, `StringEnum`) | New file; only the registration shape and `StringEnum` are borrowed |
 | `fetch.ts` | — | New. Upstream has no engine chain of this form |
 | `cache.ts` | — | New, 2026-09-17. Upstream has a fetch cache, but it was left out at the fork and this is not a port of it |
@@ -64,7 +64,7 @@ Get the sources:
 
 ```bash
 # Ancestor: the diff since the commit in the Sources table.
-cd ~/dev/pi-web-access && git pull --ff-only
+cd ~/dev/pi-web-access.github/ && git pull --ff-only
 git diff 192ac18..HEAD -- extract.ts brave.ts ssrf-protection.ts content-find.ts pdf-extract.ts
 
 # Design source: the published package.

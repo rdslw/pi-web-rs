@@ -158,11 +158,10 @@ The keys use the vendors' own variable names, so a key already exported for anot
 
 ### File location
 
-`/webrs show` prints the path in use. It is chosen in this order:
+`/webrs show` prints the path in use. The file is `web-rs.json` in the pi agent directory, as pi itself resolves it (`getAgentDir()`):
 
 1. `$PI_CODING_AGENT_DIR/web-rs.json`, when that variable is set
-2. `$XDG_CONFIG_HOME/pi/web-rs.json`, when `XDG_CONFIG_HOME` is set — but `~/.pi/web-rs.json` is kept if that older file exists and the XDG one does not
-3. `~/.pi/agent/web-rs.json`
+2. `~/.pi/agent/web-rs.json`
 
 ### Minimal config
 

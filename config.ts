@@ -3,7 +3,7 @@
  *
  * Precedence, highest first:
  *   1. environment variables
- *   2. the JSON file ~/.pi/agent/web-rs.json
+ *   2. the JSON file web-rs.json in the pi agent directory (getAgentDir)
  *   3. the DEFAULTS block in this file
  *
  * Edit the DEFAULTS block to change the behaviour of the extension without a
@@ -11,9 +11,9 @@
  * web_fetch uses and in which order.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export type FetchEngine = "http" | "jina";
 export type SafeSearch = "off" | "moderate" | "strict";
@@ -161,53 +161,31 @@ export interface ResolvedConfig {
 	domainPolicy: { allow: string[]; deny: string[] };
 }
 
-let cachedConfigDir: string | undefined;
-
-/** Resolve the pi agent directory the same way pi itself does. */
-export function getConfigDir(): string {
-	if (cachedConfigDir) return cachedConfigDir;
-
-	const explicitDir = process.env.PI_CODING_AGENT_DIR;
-	if (explicitDir) return cachedConfigDir = explicitDir;
-
-	const xdgConfigHome = process.env.XDG_CONFIG_HOME;
-	if (xdgConfigHome) {
-		const xdgDir = join(xdgConfigHome, "pi");
-		if (existsSync(join(xdgDir, CONFIG_FILENAME))) return cachedConfigDir = xdgDir;
-		const legacyDir = join(homedir(), ".pi");
-		if (existsSync(join(legacyDir, CONFIG_FILENAME))) return cachedConfigDir = legacyDir;
-		return cachedConfigDir = xdgDir;
-	}
-	return cachedConfigDir = join(homedir(), ".pi", "agent");
-}
-
 const CONFIG_FILENAME = "web-rs.json";
 
+/** The config file lives in the pi agent directory, as pi resolves it. */
 export function getConfigPath(): string {
-	return join(getConfigDir(), CONFIG_FILENAME);
+	return join(getAgentDir(), CONFIG_FILENAME);
 }
 
-let cachedFile: { signature: string; value: Record<string, unknown> } | null = null;
+let cachedFile: { key: string; value: Record<string, unknown> } | null = null;
 
-/** Read and cache the JSON file. The cache key is mtime plus size. */
+/** Read and cache the JSON file. The cache key is path, mtime, and size. */
 function loadConfigFile(): Record<string, unknown> {
 	const path = getConfigPath();
-	if (!existsSync(path)) return {};
 
-	let signature: string;
-	try {
-		const stat = statSync(path);
-		signature = `${stat.mtimeMs}:${stat.size}`;
-	} catch {
-		return {};
-	}
-	if (cachedFile?.signature === signature) return cachedFile.value;
-
+	let key: string;
 	let raw: string;
 	try {
+		const stat = statSync(path);
+		key = `${path}:${stat.mtimeMs}:${stat.size}`;
+		if (cachedFile?.key === key) return cachedFile.value;
 		raw = readFileSync(path, "utf-8");
-	} catch {
-		return {};
+	} catch (err) {
+		// Only a missing file means "no config". An unreadable one is an error.
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`Failed to read ${path}: ${message}`);
 	}
 
 	let parsed: unknown;
@@ -220,7 +198,7 @@ function loadConfigFile(): Record<string, unknown> {
 	const value = parsed && typeof parsed === "object" && !Array.isArray(parsed)
 		? parsed as Record<string, unknown>
 		: {};
-	cachedFile = { signature, value };
+	cachedFile = { key, value };
 	return value;
 }
 

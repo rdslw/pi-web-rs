@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DEFAULTS, configTemplate, parseFetchChain } from "../config.ts";
+import { DEFAULTS, configTemplate, loadConfig, parseFetchChain } from "../config.ts";
 
 test("parses a fetch chain from an array", () => {
 	assert.deepEqual(parseFetchChain(["jina", "http"], DEFAULTS.fetchChain), ["jina", "http"]);
@@ -70,7 +70,7 @@ test("README documents every config key with its real default", () => {
 	assert.deepEqual([...documented.keys()].filter(key => !template.has(key)), [], "the table documents a key the config does not have");
 });
 
-test("the JSON file overrides the in-source defaults, and the environment overrides the file", async (t) => {
+test("the JSON file overrides the in-source defaults, and the environment overrides the file", (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-rs-"));
 	writeFileSync(join(dir, "web-rs.json"), JSON.stringify({
 		braveApiKey: "file-key",
@@ -79,12 +79,9 @@ test("the JSON file overrides the in-source defaults, and the environment overri
 		search: { numResults: 9 },
 	}));
 
-	// getConfigDir caches per process, so the module is imported in a child
-	// environment through a fresh import with the env var already set.
 	process.env.PI_CODING_AGENT_DIR = dir;
 	t.after(() => { delete process.env.PI_CODING_AGENT_DIR; delete process.env.BRAVE_API_KEY; });
 
-	const { loadConfig } = await import(`../config.ts?case=${Date.now()}`);
 	const fromFile = loadConfig();
 	assert.equal(fromFile.braveApiKey, "file-key");
 	assert.deepEqual(fromFile.fetchChain, ["jina"]);
@@ -99,12 +96,11 @@ test("the JSON file overrides the in-source defaults, and the environment overri
 	assert.deepEqual(fromEnv.fetchChain, ["jina"], "every other key comes from the file");
 });
 
-test("out-of-range numbers fall back to the defaults", async () => {
+test("out-of-range numbers fall back to the defaults", () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-rs-"));
 	writeFileSync(join(dir, "web-rs.json"), JSON.stringify({ timeoutMs: "soon", search: { numResults: 900 } }));
 	process.env.PI_CODING_AGENT_DIR = dir;
 
-	const { loadConfig } = await import(`../config.ts?range=${Date.now()}`);
 	const config = loadConfig();
 	assert.equal(config.timeoutMs, DEFAULTS.timeoutMs);
 	assert.equal(config.search.numResults, 20, "clamped to the Brave maximum");
